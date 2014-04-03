@@ -14,7 +14,6 @@
 (def images
   {:tank (load-image "tankgui/tank.jpeg")
    :mine (load-image "tankgui/bomb.jpeg")
-   :kim (load-image "tankgui/kim.jpg")
    :? (load-image "tankgui/qmark.jpeg")
    })
 
@@ -27,7 +26,6 @@
                (not (instance? clojure.lang.Ref val)) (images :?)
                (map? @val) (images :tank)
                (number? @val) (images :mine)
-               (= :kim @val) (images :kim)
                true (images :?);default case
                )
              (inc (int (* x cell-size)))
