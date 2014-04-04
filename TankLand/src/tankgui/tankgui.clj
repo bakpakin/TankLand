@@ -20,10 +20,10 @@
 (defn- draw-cells
   [g board cell-size]
   (.setColor g Color/WHITE)
-  (doseq [[[x y] val] @board]
+  (doseq [[[y x] val] @board]
            (.drawImage g 
              (cond
-               (not (instance? clojure.lang.Ref val)) (images :?)
+               (not (instance? clojure.lang.IReference val)) (images :?)
                (map? @val) (images :tank)
                (number? @val) (images :mine)
                true (images :?);default case
