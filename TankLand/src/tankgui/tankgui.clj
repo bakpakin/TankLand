@@ -12,9 +12,9 @@
 
 ;to add images, put them in the classpath and load them as done below
 (def images
-  {:tank (load-image "tankgui/tank.jpeg")
-   :mine (load-image "tankgui/bomb.jpeg")
-   :? (load-image "tankgui/qmark.jpeg")
+  {:tank (load-image "tankgui/tank.png")
+   :mine (load-image "tankgui/mine.png")
+   :? (load-image "tankgui/qmark.png")
    })
 
 (defn- draw-cells
@@ -69,8 +69,14 @@
 
 (defn- make-panel-with-frame
   [viewer]
-  (let [panel (make-panel viewer)]
-    (.setPreferredSize panel (new Dimension 800 600))
+  (let [panel (make-panel viewer)
+        cs @(viewer :cell-size)
+        w @(viewer :width)
+        h @(viewer :height)]
+    (if (or (= -1 w) (= -1 h))
+          (.setPreferredSize panel (new Dimension 800 600))
+          (.setPreferredSize panel (new Dimension (* cs w) (* cs h)))
+    )
     (doto (new JFrame) 
       (.setContentPane panel) 
       .pack 
@@ -124,7 +130,7 @@
 (defn init-graphics
   "Initilaizes the gui with a board of specified height and width."
   ([width height]
-  (def ^:private viewer (make-viewer 40 width height)))
+  (def ^:private viewer (make-viewer 64 width height)))
   ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
 
