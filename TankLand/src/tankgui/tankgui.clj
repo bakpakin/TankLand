@@ -20,7 +20,7 @@
 (defn- draw-cells
   [g board cell-size]
   (.setColor g Color/WHITE)
-  (doseq [[[y x] val] @board]
+  (doseq [[[y x] val] board]
            (.drawImage g 
              (cond
                (not (instance? clojure.lang.IReference val)) (images :?)
@@ -127,6 +127,7 @@
   "Initilaizes the gui with a board of specified height and width."
   ([width height]
   (def viewer (make-viewer 40 width height)))
+  ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
 
 (defn do-graphics
