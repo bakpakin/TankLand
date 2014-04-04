@@ -72,13 +72,13 @@ if its health drops to 0 or less."
               (log name " was added at " location "."))
       tank)))
 
-(declare name, energy)
+(declare name, energy, with-relative-time)
 
 (defn- run
   "Runs Tankland with one tank for each of the given behaviors."
   [& info]
   (init-graphics size size)
-  (future (while true (do-graphics @board)))
+  (future (while true (do-graphics @board) (Thread/sleep 100)))
   (doseq [[name behavior-fn] info]
     (when (and (string? name) behavior-fn)
       (let [tank (add-tank name)]

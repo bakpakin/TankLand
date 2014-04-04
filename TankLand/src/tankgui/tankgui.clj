@@ -36,6 +36,7 @@
 
 (defn- draw-grid
   [g width height cell-size]
+  (.setColor g Color/GRAY)
   (let [x1 0
         y1 0
         x2 (* cell-size width)
@@ -60,6 +61,7 @@
 (defn- make-panel
   [viewer]
   (proxy [JPanel] [] (paint [g] 
+                       (proxy-super paint g)
                        (.translate g @(viewer :x) @(viewer :y)) 
                        (if (or (= -1 @(viewer :width)) (= -1 @(viewer :height)))
                          (draw-grid-infinite g @(viewer :cell-size))
@@ -72,12 +74,13 @@
   (let [panel (make-panel viewer)
         cs @(viewer :cell-size)
         w @(viewer :width)
-        h @(viewer :height)]
+        h @(viewer :height)
+        frame (new JFrame)]
     (if (or (= -1 w) (= -1 h))
           (.setPreferredSize panel (new Dimension 800 600))
           (.setPreferredSize panel (new Dimension (* cs w) (* cs h)))
     )
-    (doto (new JFrame) 
+    (doto frame 
       (.setContentPane panel) 
       .pack 
       (.setVisible true))
@@ -106,7 +109,7 @@
   (let [viewer 
         {
         :board (atom {})
-        :display-panel nil
+        :display-panel (atom nil)
         :cell-size (atom cell-size)
         :x (atom 0)
         :y (atom 0)
@@ -115,8 +118,8 @@
         :mousex (atom 0)
         :mousey (atom 0)
         }]
-  (assoc viewer
-          :display-panel (atom (make-panel-with-frame viewer)))))
+  (reset! (viewer :display-panel) (make-panel-with-frame viewer))
+  viewer))
   ([cell-size]
   (make-viewer cell-size -1 -1)))
 
@@ -130,7 +133,8 @@
 (defn init-graphics
   "Initilaizes the gui with a board of specified height and width."
   ([width height]
-  (def ^:private viewer (make-viewer 64 width height)))
+  (def ^:private viewer (make-viewer 64 width height))
+  (.setBackground @(viewer :display-panel) Color/WHITE))
   ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
 
