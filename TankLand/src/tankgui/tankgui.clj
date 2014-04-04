@@ -24,8 +24,8 @@
            (.drawImage g 
              (cond
                (not (instance? clojure.lang.IReference val)) (images :?)
-               (map? @val) (images :tank)
                (number? @val) (images :mine)
+               (map? @val) (images :tank)
                true (images :?);default case
                )
              (inc (int (* x cell-size)))
@@ -43,8 +43,7 @@
     (doseq [x (range x1 (inc x2) cell-size)]
       (.drawLine g x y1 x y2))
     (doseq [y (range y1 (inc y2) cell-size)]
-      (.drawLine g x1 y x2 y))
-  ))
+      (.drawLine g x1 y x2 y))))
 
 (defn- draw-grid-infinite
   [g cell-size]
@@ -56,8 +55,7 @@
     (doseq [x (range x1 x2 cell-size)]
       (.drawLine g x y1 x y2))
     (doseq [y (range y1 y2 cell-size)]
-      (.drawLine g x1 y x2 y))
-  ))
+      (.drawLine g x1 y x2 y))))
 
 (defn- make-panel
   [viewer]
@@ -126,7 +124,7 @@
 (defn init-graphics
   "Initilaizes the gui with a board of specified height and width."
   ([width height]
-  (def viewer (make-viewer 40 width height)))
+  (def ^:private viewer (make-viewer 40 width height)))
   ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
 
