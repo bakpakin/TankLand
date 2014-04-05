@@ -5,7 +5,9 @@
   (:import java.awt.Color)
   (:import java.awt.event.WindowAdapter)
   (:import java.awt.event.MouseAdapter)
-  (:import java.awt.event.ComponentAdapter))
+  (:import java.awt.event.ComponentAdapter)
+  (:import javax.swing.JSplitPane)
+  (:import javax.swing.JList))
 
 (defn- load-image
   [classpath]
@@ -76,6 +78,13 @@
           (.setPreferredSize panel (new Dimension 800 600))
           (.setPreferredSize panel (new Dimension (* cs w) (* cs h)))
     )
+    (.setBackground panel Color/WHITE)
+    panel))
+
+(defn- make-tank-panel
+  [viewer]
+  (let [panel (new JList)]
+    
     panel))
 
 (defn add-drag-control
@@ -128,16 +137,14 @@
         :mousey (atom 0)
         }
         panel (make-panel viewer)
-        tank-panel nil
-        cs @(viewer :cell-size)
-        w @(viewer :width)
-        h @(viewer :height)
-        frame (new JFrame)]
+        tank-panel (make-tank-panel viewer)
+        frame (new JFrame)
+        splitPane (new JSplitPane JSplitPane/HORIZONTAL_SPLIT panel tank-panel)]
   (reset! (viewer :display-panel) panel)
   (reset! (viewer :tank-panel) tank-panel)
   (reset! (viewer :frame) frame)
   (doto frame 
-      (.setContentPane panel) 
+      (.setContentPane splitPane) 
       .pack 
       (.setVisible true))
   viewer))
@@ -150,11 +157,16 @@
   (reset! (viewer :board) board)
   (.repaint @(viewer :display-panel)))
 
+(defn update-tank-panel
+  "Updates the tank information in the viewer. Also calls repaint."
+  [viewer tanks]
+  (reset! (viewer :tanks) tanks)
+  (.repaint @(viewer :tank-panel)))
+
 (defn init-graphics
   "Initilaizes the gui with a board of specified height and width."
   ([width height]
   (def ^:private viewervar (make-viewer 64 width height))
-  (.setBackground @(viewervar :display-panel) Color/WHITE)
   (add-resize-control viewervar))
   ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
