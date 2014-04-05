@@ -4,7 +4,8 @@
   (:import java.awt.Dimension)
   (:import java.awt.Color)
   (:import java.awt.event.WindowAdapter)
-  (:import java.awt.event.MouseAdapter))
+  (:import java.awt.event.MouseAdapter)
+  (:import java.awt.event.ComponentAdapter))
 
 (defn- load-image
   [classpath]
@@ -39,8 +40,8 @@
   (.setColor g Color/GRAY)
   (let [x1 0
         y1 0
-        x2 (* cell-size width)
-        y2 (* cell-size height)]
+        x2 (int (* cell-size width))
+        y2 (int (* cell-size height))]
     (doseq [x (range x1 (inc x2) cell-size)]
       (.drawLine g x y1 x y2))
     (doseq [y (range y1 (inc y2) cell-size)]
@@ -51,8 +52,8 @@
   (let [r (.getClipBounds g)
         x1 (int (* (Math/floor (double (/ (.getX r) cell-size))) cell-size))
         y1 (int (* (Math/floor (double (/ (.getY r) cell-size))) cell-size))
-        x2 (+ x1 (.getWidth r) cell-size)
-        y2 (+ y1 (.getHeight r) cell-size)]
+        x2 (int (+ x1 (.getWidth r) cell-size))
+        y2 (int (+ y1 (.getHeight r) cell-size))]
     (doseq [x (range x1 x2 cell-size)]
       (.drawLine g x y1 x y2))
     (doseq [y (range y1 y2 cell-size)]
@@ -60,30 +61,21 @@
 
 (defn- make-panel
   [viewer]
-  (proxy [JPanel] [] (paint [g] 
-                       (proxy-super paint g)
-                       (.translate g @(viewer :x) @(viewer :y)) 
-                       (if (or (= -1 @(viewer :width)) (= -1 @(viewer :height)))
-                         (draw-grid-infinite g @(viewer :cell-size))
-                         (draw-grid g @(viewer :width) @(viewer :height) @(viewer :cell-size))
-                       )
-                       (draw-cells g @(viewer :board) @(viewer :cell-size)))))
-
-(defn- make-panel-with-frame
-  [viewer]
-  (let [panel (make-panel viewer)
+  (let [panel (proxy [JPanel] [] (paint [g] 
+                                   (proxy-super paint g)
+                                   (.translate g @(viewer :x) @(viewer :y)) 
+                                   (if (or (= -1 @(viewer :width)) (= -1 @(viewer :height)))
+                                     (draw-grid-infinite g @(viewer :cell-size))
+                                     (draw-grid g @(viewer :width) @(viewer :height) @(viewer :cell-size))
+                                   )
+                                   (draw-cells g @(viewer :board) @(viewer :cell-size))))
         cs @(viewer :cell-size)
         w @(viewer :width)
-        h @(viewer :height)
-        frame (new JFrame)]
+        h @(viewer :height)]
     (if (or (= -1 w) (= -1 h))
           (.setPreferredSize panel (new Dimension 800 600))
           (.setPreferredSize panel (new Dimension (* cs w) (* cs h)))
     )
-    (doto frame 
-      (.setContentPane panel) 
-      .pack 
-      (.setVisible true))
     panel))
 
 (defn add-drag-control
@@ -102,6 +94,20 @@
         (reset! (viewer :mousey) (.getY e)))))
   viewer)
 
+(defn add-resize-control
+  "Adds capapbility of the viewer to resize grid when the window is resized."
+  [viewer]
+  (.addComponentListener @(viewer :display-panel)
+    (proxy [ComponentAdapter] [] 
+      (componentResized [e] 
+        (let [w @(viewer :width)
+              h @(viewer :height)
+              panel @(viewer :display-panel)
+              pw (.getWidth panel)
+              ph (.getHeight panel)]
+          (if (and (not= -1 w) (not= -1 h))
+            (reset! (viewer :cell-size) (min (/ pw w) (/ ph h)))))))))
+
 (defn make-viewer
   "Makes a new viewer that displays a board of given width and height, 
    or infinte width and height if no dimensions are supplied."
@@ -109,7 +115,10 @@
   (let [viewer 
         {
         :board (atom {})
+        :tanks (atom {})
         :display-panel (atom nil)
+        :tank-panel (atom nil)
+        :frame (atom nil)
         :cell-size (atom cell-size)
         :x (atom 0)
         :y (atom 0)
@@ -117,28 +126,40 @@
         :height (atom height)
         :mousex (atom 0)
         :mousey (atom 0)
-        }]
-  (reset! (viewer :display-panel) (make-panel-with-frame viewer))
+        }
+        panel (make-panel viewer)
+        tank-panel nil
+        cs @(viewer :cell-size)
+        w @(viewer :width)
+        h @(viewer :height)
+        frame (new JFrame)]
+  (reset! (viewer :display-panel) panel)
+  (reset! (viewer :tank-panel) tank-panel)
+  (reset! (viewer :frame) frame)
+  (doto frame 
+      (.setContentPane panel) 
+      .pack 
+      (.setVisible true))
   viewer))
   ([cell-size]
   (make-viewer cell-size -1 -1)))
 
-(defn update-viewer
+(defn update-board
   "Updates the board of the viewer. Also calls a repaint."
   [viewer board]
   (reset! (viewer :board) board)
   (.repaint @(viewer :display-panel)))
 
-
 (defn init-graphics
   "Initilaizes the gui with a board of specified height and width."
   ([width height]
-  (def ^:private viewer (make-viewer 64 width height))
-  (.setBackground @(viewer :display-panel) Color/WHITE))
+  (def ^:private viewervar (make-viewer 64 width height))
+  (.setBackground @(viewervar :display-panel) Color/WHITE)
+  (add-resize-control viewervar))
   ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
 
 (defn do-graphics
   "Updates the gui to show the current board."
   [board]
-  (update-viewer viewer board))
+  (update-board viewervar board))
