@@ -2,6 +2,7 @@
   [:use [tankgui.tankgui :only [init-graphics do-graphics]]])
 
 (def ^:const size 10)
+(def ^:const wrap false)
 (def ^:private timescale 250)
 (def ^:private board (ref {}))
 (def ^:private tanks (ref (sorted-map)))
@@ -12,20 +13,15 @@
 Can safely be called in a transaction."
   [& message]
   (let [message (apply str message)]
-    (send log-agent #(do #_(println message)
+    (send log-agent #(do (println message)
             (conj % {:timestamp (System/currentTimeMillis)
-                     :message message}) nil))))
+                     :message message})))))
 
 (defn- print-full-log
   "Prints the log in a human-readable form."
   []
   (doseq [message @log-agent]
     (println "At" (:timestamp message) (:message message))))
-
-(defn- wrap
-  "Given a coordinate pair, wraps the coordinates on the board."
-  [[row col]]
-  [(mod row size) (mod col size)])
 
 (defn- get-cell
   "Gets the occupant of a cell on the board. Returns nil if cell is empty.
@@ -57,20 +53,23 @@ if its health drops to 0 or less."
       (log (:name new-state) " died."))))
 
 (defn- add-tank
-  "Adds a new tank with the given name. Returns the tank."
+  "Adds a new tank with the given name. Returns the tank. If there is no room
+on the board, or there is another tank of the same name, returns nil."
   [name]
-  (let [tank (ref {:name name :health 100 :energy 1000000})]
-    (add-watch tank :death-watch tank-death-watch)
-    (dosync (let [locations (for [row (range size), col (range size)
-                                  :let [location [row col]]
-                                  :when (not (get-cell location))]
-                              location)
-                  location (rand-nth locations)]
-              (alter tank assoc :location location)
-              (alter board assoc location tank)
-              (alter tanks assoc name tank)
-              (log name " was added at " location "."))
-      tank)))
+  (if (contains? @tanks name)
+    (log "A tank already has the name " name)
+    (let [tank (ref {:name name :health 100 :energy (* size size 10)})]
+      (add-watch tank :death-watch tank-death-watch)
+      (dosync (if-let [locations (seq (for [row (range size), col (range size)
+                                            :let [location [row col]]
+                                            :when (not (get-cell location))]
+                                        location))]
+                (let [location (rand-nth locations)]
+                  (alter tank assoc :location location)
+                  (alter board assoc location tank)
+                  (alter tanks assoc name tank)
+                  (log name " was added at " location ".")))
+        tank))))
 
 (declare name, energy)
 
@@ -123,7 +122,8 @@ and executes the body in a dosync with the relative time cost."
 (defn- new-location
   "Obtain a new location from an old location and a direction. Wraps."
   [old-loc direction]
-  (wrap (vec (map + old-loc (directions direction)))))
+  (let [[row col] (vec (map + old-loc (directions direction)))]
+    (if wrap [(mod row size) (mod col size)] [row col])))
 
 (defn- deref'
   "Derefs a reference, but doesn't try to deref a value."
@@ -138,6 +138,34 @@ The resulting function will be public."
      ~(str "Gets the " attr " of the tank.")
      [~'tank]
      (~(keyword attr) (deref ~'tank))))
+
+(defn- occupant-type
+  "Returns the type of a cell occupant, nil, :tank, :mine, :wall, or :other."
+  [cell]
+  (let [occupant (deref' (get-cell cell))]
+    (cond
+      (map? occupant) :tank
+      (number? occupant) :mine
+      (nil? occupant) nil
+      (= :wall occupant) :wall
+      :default :other)))
+
+(defn- scan-cells
+  "Takes a list of cells to scan and returns a map with the occupied cells."
+  [cells]
+  (->> cells
+    (map (fn [cell] {cell (occupant-type cell)}))
+    (filter #(first (vals %)))
+    (into {})))
+
+(defn- area
+  "Generates a list of the cells in an area, excluding the center."
+  [[row col] radius]
+  (for [dr (range (- radius) (inc radius))
+        dc (range (- radius) (inc radius))
+        :when (not= 0 dr dc)]
+    (if wrap [(mod (+ row dr) size) (mod (+ col dc) size)]
+      [(+ row dr) (+ col dc)])))
 
 ; Begin tank helper functions
 
@@ -179,7 +207,7 @@ If there is already a mine there, the mines will combine.
 If there is a tank there, the mine will detonate instantly."
   [tank damage direction]
   (do-tank-action
-    tank (* 1000 damage) 1
+    tank (* 0 damage) 1
     (let [mine-loc (new-location (location tank) direction)
           occupant (get-cell mine-loc)]
       (log (name tank) " placed a " damage "-damage mine at " mine-loc ".")
@@ -190,3 +218,39 @@ If there is a tank there, the mine will detonate instantly."
         (do (alter occupant update-in [:health] - damage)
           (log "The mine " (name tank) " placed under " (name occupant)
                " detonated and dealt " damage " damage."))))))
+
+(defn defuse-mine
+  "If there is a mine in the given direction, defuse it.
+Uses energy even if there is not a mine."
+  [tank direction]
+  (do-tank-action
+    tank 0 0
+    (let [defuse-loc (new-location (location tank) direction)]
+      (when (number? (deref' (get-cell defuse-loc)))
+        (clear-cell defuse-loc)
+        (log (name tank) " defused the mine at " defuse-loc ".")))))
+
+(defn scan-line
+  "Scan in a line in one direction for some distance.
+Returns a map of the occupied scanned squares to their occupants,
+each of which will be either :tank, :mine, or :wall."
+  [tank direction distance]
+  (do-tank-action
+    tank (* 0 distance) 0
+    (->> (iterate #(new-location % direction) (location tank))
+     rest (take distance)
+     scan-cells)))
+
+(defn scan-area
+  "Scan an area of the given radius around the tank.
+Returns a map of the occupied scanned squares to their occupants,
+each of which will be either :tank, :mine, or :wall."
+  [tank radius]
+  (do-tank-action
+    tank (* 0 radius radius) 0
+    (scan-cells (area (location tank) radius))))
+
+#_(apply run (for [i (range 10)]
+              [(str "Tank " i) (fn [tank] (move tank (rand-direction))
+                                 (when (> 25 (inc (rand-int 100)))
+                                   (place-mine tank 10 (rand-direction))))]))
