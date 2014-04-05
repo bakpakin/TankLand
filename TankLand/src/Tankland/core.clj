@@ -249,8 +249,3 @@ each of which will be either :tank, :mine, or :wall."
   (do-tank-action
     tank (* 0 radius radius) 0
     (scan-cells (area (location tank) radius))))
-
-#_(apply run (for [i (range 10)]
-              [(str "Tank " i) (fn [tank] (move tank (rand-direction))
-                                 (when (> 25 (inc (rand-int 100)))
-                                   (place-mine tank 10 (rand-direction))))]))
