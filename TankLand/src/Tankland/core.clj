@@ -167,6 +167,19 @@ The resulting function will be public."
     (if wrap [(mod (+ row dr) size) (mod (+ col dc) size)]
       [(+ row dr) (+ col dc)])))
 
+(defn- get-artillery-cost
+  [tank location]
+  (let [k 0 ;Some value to be decided later on
+        translation-vector (map - location ((deref' tank) :location))
+        range (int (Math/sqrt (apply + (map #(* % %) translation-vector))))]
+    (* k r)))
+
+(defn- get-restorable-health 
+  [tank health]
+  (if (> (+ health ((deref' tank) :health) 100)
+    (- 100 ((deref' tank) :health))
+    health))
+
 ; Begin tank helper functions
 
 (defaccessor "health")
@@ -249,3 +262,31 @@ each of which will be either :tank, :mine, or :wall."
   (do-tank-action
     tank (* 0 radius radius) 0
     (scan-cells (area (location tank) radius))))
+
+(defn fire-artillery
+  "Fire artillery artillery at a specific coordinate. If the coordinate is 
+out of bounds, it does nothing. If there is a mine, then it is defused. If 
+there is a tank, their health is reduced by a constant amount"
+  [tank location]
+  (do-tank-action
+    tank (get-artillery-cost tank location) 5
+    (let [damage 10 ;Some value to be decided later
+          occupant (get-cell location)]
+      (cond 
+        (number? (deref' occupant)) (alter board assoc location nil)
+        (map? (deref' occupant)) (alter occupant update-in [:health] - damage)))))
+
+(defn repair-tank
+  [tank health]
+  (do-tank-action
+    tank (* k (get-restorable-health tank health) 0)
+    (let [h (get-restorable-health tank health)]
+      (alter tank update-in [:health] + h))))
+
+(defn recharge
+  [tank time]
+  (do-tank-action
+    tank 0 time
+    (alter tank update-in [:energy] + (* k time))
+    (if (> ((deref' tank) :energy) (* size size 10))
+      (alter tank assoc :energy (* size size 10)))))
