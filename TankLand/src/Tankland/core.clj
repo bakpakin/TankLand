@@ -8,6 +8,15 @@
 (def ^:private tanks (ref (sorted-map)))
 (def ^:private log-agent (agent []))
 
+(defn- deref-walk [x]
+  "Derefs every reference in a nested data structure."
+  (clojure.walk/prewalk 
+    (fn [e] 
+      (if (instance? clojure.lang.IReference e) 
+        (deref-walk (deref e)) 
+        e)) 
+    x))
+
 (defn- log
   "Logs a the string concatenation of message.
 Can safely be called in a transaction."
@@ -15,7 +24,8 @@ Can safely be called in a transaction."
   (let [message (apply str message)]
     (send log-agent #(do (println message)
             (conj % {:timestamp (System/currentTimeMillis)
-                     :message message})))))
+                     :message message
+                     :game-state (deref-walk {:board board :tanks tanks})})))))
 
 (defn- print-full-log
   "Prints the log in a human-readable form."
@@ -57,7 +67,7 @@ if its health drops to 0 or less."
 on the board, or there is another tank of the same name, returns nil."
   [name]
   (if (contains? @tanks name)
-    (log "A tank already has the name " name)
+    (log "A tank already has the name " name ".")
     (let [tank (ref {:name name :health 100 :energy (* size size 10)})]
       (add-watch tank :death-watch tank-death-watch)
       (dosync (if-let [locations (seq (for [row (range size), col (range size)
@@ -68,19 +78,20 @@ on the board, or there is another tank of the same name, returns nil."
                   (alter tank assoc :location location)
                   (alter board assoc location tank)
                   (alter tanks assoc name tank)
-                  (log name " was added at " location ".")))
-        tank))))
+                  (log name " was added at " location ".")
+                  tank))))))
 
 (declare name, energy)
 
 (defn- run
   "Runs Tankland with one tank for each of the given behaviors."
   [& info]
-  (init-graphics size size)
-  (future (while true (do-graphics @board) (Thread/sleep 100)))
+  (init-graphics size)
+  (do-graphics @board) ; just in case there are already things on the board
+  (add-watch board :graphics #(do-graphics %4))
   (doseq [[name behavior-fn] info]
     (when (and (string? name) behavior-fn)
-      (let [tank (add-tank name)]
+      (if-let [tank (add-tank name)]
         (future (while (alive @tank) (behavior-fn tank)))
         (log name " started.")))))
 
@@ -167,18 +178,10 @@ The resulting function will be public."
     (if wrap [(mod (+ row dr) size) (mod (+ col dc) size)]
       [(+ row dr) (+ col dc)])))
 
-(defn- get-artillery-cost
-  [tank location]
-  (let [k 0 ;Some value to be decided later on
-        translation-vector (map - location ((deref' tank) :location))
-        range (int (Math/sqrt (apply + (map #(* % %) translation-vector))))]
-    (* k range)))
-
-(defn- get-restorable-health 
-  [tank health]
-  (if (> (+ health ((deref' tank) :health) 100)
-    (- 100 ((deref' tank) :health)))
-    health))
+(defn- distance
+  "Calculates the distance between two locations."
+  [[r1 c1] [r2 c2]]
+  (min (Math/abs (- r1 r2)) (Math/abs (- c1 c2))))
 
 ; Begin tank helper functions
 
@@ -264,29 +267,32 @@ each of which will be either :tank, :mine, or :wall."
     (scan-cells (area (location tank) radius))))
 
 (defn fire-artillery
-  "Fire artillery artillery at a specific coordinate. If the coordinate is 
-out of bounds, it does nothing. If there is a mine, then it is defused. If 
-there is a tank, their health is reduced by a constant amount"
-  [tank location]
+  "Fire artillery artillery at a specific location.
+Does 10 damage if it hits a tank."
+  [tank target]
   (do-tank-action
-    tank (get-artillery-cost tank location) 5
-    (let [damage 10 ;Some value to be decided later
-          occupant (get-cell location)]
-      (cond 
-        (number? (deref' occupant)) (alter board assoc location nil)
-        (map? (deref' occupant)) (alter occupant update-in [:health] - damage)))))
+    tank (* 0 (distance (location tank) target)) 0
+    (let [occupant (get-cell target)
+          log (partial log (name tank) " fired artillery at " target " and ")]
+      (if (map? (deref' occupant))
+        (do (alter occupant update-in [:health] - 10)
+          (log " hit " (name occupant) "."))
+        (log "missed.")))))
 
-(defn repair-tank
-  [tank health]
+(defn repair
+  "Repairs some damage to a tank. The health of the tank cannot exceed 100,
+but energy will still be consumed for unused repairs. It is recommended to use
+the health function to obtain the current health of your tank."
+  [tank damage]
   (do-tank-action
-    tank (* 0 (get-restorable-health tank health) 0)
-    (let [h (get-restorable-health tank health)]
-      (alter tank update-in [:health] + h))))
+    tank (* 0 damage) 0
+    (alter tank update-in [:health] #(min 100 (+ damage %)))
+    (log (name tank) " repaired " damage " damage.")))
 
 (defn recharge
-  [tank time]
+  "Go dormant for some number of time units in order to regain energy.
+The more time spent dormant, the more energy gained."
+  [tank time-units]
   (do-tank-action
-    tank 0 time
-    (alter tank update-in [:energy] + (* 0 time))
-    (if (> ((deref' tank) :energy) (* size size 10))
-      (alter tank assoc :energy (* size size 10)))))
+    tank (* -10 time-units) time-units
+    (log (name tank) " recharged for " time-units " time units.")))
