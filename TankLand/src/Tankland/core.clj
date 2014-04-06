@@ -172,12 +172,12 @@ The resulting function will be public."
   (let [k 0 ;Some value to be decided later on
         translation-vector (map - location ((deref' tank) :location))
         range (int (Math/sqrt (apply + (map #(* % %) translation-vector))))]
-    (* k r)))
+    (* k range)))
 
 (defn- get-restorable-health 
   [tank health]
   (if (> (+ health ((deref' tank) :health) 100)
-    (- 100 ((deref' tank) :health))
+    (- 100 ((deref' tank) :health)))
     health))
 
 ; Begin tank helper functions
@@ -279,7 +279,7 @@ there is a tank, their health is reduced by a constant amount"
 (defn repair-tank
   [tank health]
   (do-tank-action
-    tank (* k (get-restorable-health tank health) 0)
+    tank (* 0 (get-restorable-health tank health) 0)
     (let [h (get-restorable-health tank health)]
       (alter tank update-in [:health] + h))))
 
@@ -287,6 +287,6 @@ there is a tank, their health is reduced by a constant amount"
   [tank time]
   (do-tank-action
     tank 0 time
-    (alter tank update-in [:energy] + (* k time))
+    (alter tank update-in [:energy] + (* 0 time))
     (if (> ((deref' tank) :energy) (* size size 10))
       (alter tank assoc :energy (* size size 10)))))
