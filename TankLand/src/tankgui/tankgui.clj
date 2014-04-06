@@ -17,7 +17,8 @@
 (def images
   {:tank (load-image "tankgui/tank.png")
    :mine (load-image "tankgui/mine.png")
-   :? (load-image "tankgui/qmark.png")
+   :other (load-image "tankgui/qmark.png")
+   :wall (load-image "tankgui/wall.png")
    })
 
 (defn- draw-cells
@@ -26,10 +27,12 @@
   (doseq [[[y x] val] board]
            (.drawImage g 
              (cond
-               (not (instance? clojure.lang.IReference val)) (images :?)
+               (= :wall val) (images :wall)
+               (not (instance? clojure.lang.IReference val)) (images :other)
+               (= :wall @val) (images :wall)
                (number? @val) (images :mine)
                (map? @val) (images :tank)
-               true (images :?);default case
+               true (images :other)
                )
              (inc (int (* x cell-size)))
              (inc (int (* y cell-size)))
