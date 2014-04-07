@@ -16,6 +16,7 @@
 ;to add images, put them in the classpath and load them as done below
 (def images
   {:tank (load-image "tankgui/tank.png")
+   :tankshield (load-image "tankgui/tankshield.png")
    :mine (load-image "tankgui/mine.png")
    :other (load-image "tankgui/qmark.png")
    :wall (load-image "tankgui/wall.png")
