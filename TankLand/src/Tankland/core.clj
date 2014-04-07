@@ -3,7 +3,16 @@
 
 (def ^:const size 10)
 (def ^:const wrap false)
+(def ^:const energy-constants
+  {:move 0 :place-mine 0 :defuse-mine 0 :scan-line 0 :scan-area 0
+   :fire-artillery 0 :fire-bullet 0 :repair 0 :recharge -10
+   :activate-shield 0})
+(def ^:const time-costs
+  {:move 1 :place-mine 1 :defuse-mine 1 :scan-line 1 :scan-area 1
+   :fire-artillery 1 :fire-bullet 1 :repair 1 :recharge "N/A"
+   :activate-shield 1})
 (def ^:private timescale 250)
+
 (def ^:private board (ref {}))
 (def ^:private tanks (ref (sorted-map)))
 (def ^:private log-agent (agent []))
@@ -98,13 +107,17 @@ on the board, or there is another tank of the same name, returns nil."
     (when (and (string? name) behavior-fn)
       (if-let [tank (add-tank name)]
         (future (while (alive @tank) (behavior-fn tank)))
-        (log name " started.")))))
+        (log name " started."))))
+  (add-watch tanks :victory
+             #(when (and (= (count %4) 1) (> (count %3) 1))
+                (let [message (str  (first (keys @tanks)) " wins!")]
+                  (log message)
+                (javax.swing.JOptionPane/showMessageDialog nil message)))))
 
 (defn- kill-all-tanks
   "KILL. ALL. THE. TANKS."
   []
-  (doseq [tank (vals @tanks)]
-    (dosync (alter tank assoc :health 0))))
+  (dosync (doseq [tank (vals @tanks)] (alter tank assoc :health 0))))
 
 (defmacro ^:private with-relative-time
   "Causes the body to take an amount of time equal to
@@ -195,16 +208,6 @@ The resulting function will be public."
     (let [damage (* damage (- 1 (shield tank)))]
       (alter tank update-in [:health] - damage)
       (log (name tank) " took " damage " damage."))))
-
-(def ^:const energy-constants
-  {:move 0 :place-mine 0 :defuse-mine 0 :scan-line 0 :scan-area 0
-   :fire-artillery 0 :fire-bullet 0 :repair 0 :recharge -10
-   :activate-shield 0})
-
-(def ^:const time-costs
-  {:move 1 :place-mine 1 :defuse-mine 1 :scan-line 1 :scan-area 1
-   :fire-artillery 1 :fire-bullet 1 :repair 1 :recharge "N/A"
-   :activate-shield 1})
 
 ; Begin tank helper functions
 
