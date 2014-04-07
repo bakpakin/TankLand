@@ -68,8 +68,8 @@ on the board, or there is another tank of the same name, returns nil."
   [name]
   (if (contains? @tanks name)
     (log "A tank already has the name " name ".")
-    (let [tank (ref {:name name :health 100 :energy (* size size 10)})]
-      (add-watch tank :death-watch tank-death-watch)
+    (let [tank (ref {:name name :health 100 :energy (* size size 10) :shield 0})
+          tank-placed? (ref false)]
       (dosync (if-let [locations (seq (for [row (range size), col (range size)
                                             :let [location [row col]]
                                             :when (not (get-cell location))]
@@ -79,9 +79,14 @@ on the board, or there is another tank of the same name, returns nil."
                   (alter board assoc location tank)
                   (alter tanks assoc name tank)
                   (log name " was added at " location ".")
-                  tank))))))
+                  (alter tank-placed? (constantly true)))))
+      (when @tank-placed?
+        (add-watch tank :death-watch tank-death-watch)
+        (future (while (alive @tank) (Thread/sleep timescale)
+                  (dosync (alter tank update-in [:energy] + 1))))
+        tank))))
 
-(declare name, energy)
+(declare name, energy, shield)
 
 (defn- run
   "Runs Tankland with one tank for each of the given behaviors."
@@ -146,7 +151,7 @@ and executes the body in a dosync with the relative time cost."
 The resulting function will be public."
   [attr]
   `(defn ~(symbol attr)
-     ~(str "Gets the " attr " of the tank.")
+     ~(str "Gets the " attr " of the tank. Costs no energy.")
      [~'tank]
      (~(keyword attr) (deref ~'tank))))
 
@@ -183,13 +188,23 @@ The resulting function will be public."
   [[r1 c1] [r2 c2]]
   (min (Math/abs (- r1 r2)) (Math/abs (- c1 c2))))
 
+(defn- deal-damage
+  "Deals damage to a tank, reduced if the tank has an active shield, and logs it."
+  [tank damage]
+  (dosync
+    (let [damage (* damage (- 1 (shield tank)))]
+      (alter tank update-in [:health] - damage)
+      (log (name tank) " took " damage " damage."))))
+
 (def ^:const energy-constants
   {:move 0 :place-mine 0 :defuse-mine 0 :scan-line 0 :scan-area 0
-   :fire-artillery 0 :fire-bullet 0 :repair 0 :recharge -10})
+   :fire-artillery 0 :fire-bullet 0 :repair 0 :recharge -10
+   :activate-shield 0})
 
 (def ^:const time-costs
   {:move 1 :place-mine 1 :defuse-mine 1 :scan-line 1 :scan-area 1
-   :fire-artillery 1 :fire-bullet 1 :repair 1 :recharge "N/A"})
+   :fire-artillery 1 :fire-bullet 1 :repair 1 :recharge "N/A"
+   :activate-shield 1})
 
 ; Begin tank helper functions
 
@@ -197,6 +212,7 @@ The resulting function will be public."
 (defaccessor "energy")
 (defaccessor "name")
 (defaccessor "location")
+(defaccessor "shield")
 
 (defn rand-direction
   "Selects a random direction."
@@ -205,7 +221,8 @@ The resulting function will be public."
 
 (defn move
   "Moves the tank in the specified direction if unobstructed.
-Costs 1000 energy and takes 1 time unit, even if there is an obstruction."
+Costs 1000 energy and takes 1 time unit, even if there is an obstruction.
+Energy cost is constant."
   [tank direction]
   (do-tank-action
     tank (energy-constants :move) (time-costs :move)
@@ -213,8 +230,8 @@ Costs 1000 energy and takes 1 time unit, even if there is an obstruction."
           new-loc (new-location old-loc direction)
           occupant #(deref' (get-cell new-loc))]
       (when (number? (occupant))
-        (alter tank update-in [:health] - (occupant))
-        (log (name tank) " took " (occupant) " damage from a mine.")
+        (log (name tank) "hit a mine while moving to " new-loc ".")
+        (deal-damage tank (occupant))
         (clear-cell new-loc))
       (if (nil? (occupant))
         (do (alter tank assoc :location new-loc)
@@ -228,7 +245,8 @@ Costs 1000 energy and takes 1 time unit, even if there is an obstruction."
   "Place a mine that does the given amount of damage
 in the adjecent space in the given direction.
 If there is already a mine there, the mines will combine.
-If there is a tank there, the mine will detonate instantly."
+If there is a tank there, the mine will detonate instantly.
+Energy cost scales with damage."
   [tank damage direction]
   (do-tank-action
     tank (* (energy-constants :place-mine) damage) (time-costs :place-mine)
@@ -239,13 +257,11 @@ If there is a tank there, the mine will detonate instantly."
         (nil? occupant) (alter board assoc mine-loc (ref damage))
         (number? (deref' occupant)) (alter occupant + damage)
         (map? (deref' occupant))
-        (do (alter occupant update-in [:health] - damage)
-          (log "The mine " (name tank) " placed under " (name occupant)
-               " detonated and dealt " damage " damage."))))))
+        (deal-damage occupant damage)))))
 
 (defn defuse-mine
-  "If there is a mine in the given direction, defuse it.
-Uses energy even if there is not a mine."
+  "If there is a mine in the adjacent square in the given direction, defuse it.
+Uses energy even if there is not a mine. Energy cost is constant."
   [tank direction]
   (do-tank-action
     tank (energy-constants :defuse-mine) (time-costs :defuse-mine)
@@ -257,7 +273,8 @@ Uses energy even if there is not a mine."
 (defn scan-line
   "Scan in a line in one direction for some distance.
 Returns a map of the occupied scanned squares to their occupants,
-each of which will be either :tank, :mine, or :wall."
+each of which will be either :tank, :mine, or :wall.
+Energy cost scales with the distance."
   [tank direction distance]
   (do-tank-action
     tank (* (energy-constants :scan-line) distance) (time-costs :scan-line)
@@ -268,15 +285,16 @@ each of which will be either :tank, :mine, or :wall."
 (defn scan-area
   "Scan an area of the given radius around the tank.
 Returns a map of the occupied scanned squares to their occupants,
-each of which will be either :tank, :mine, or :wall."
+each of which will be either :tank, :mine, or :wall.
+Energy cost scales with the square of the radius."
   [tank radius]
   (do-tank-action
     tank (#(* % % %2) (energy-constants :scan-area) radius) (time-costs :scan-area)
     (scan-cells (area (location tank) radius))))
 
 (defn fire-artillery
-  "Fire artillery artillery at a specific location.
-Does 10 damage if it hits a tank."
+  "Fire artillery artillery at a specific location. Does 10 damage if it hits a
+tank. Energy cost scales with the distance of the target."
   [tank target]
   (do-tank-action
     tank (* (energy-constants :fire-artillery) (distance (location tank) target))
@@ -284,15 +302,16 @@ Does 10 damage if it hits a tank."
     (let [occupant (get-cell target)
           log (partial log (name tank) " fired artillery at " target " and ")]
       (if (map? (deref' occupant))
-        (do (alter occupant update-in [:health] - 10)
-          (log " hit " (name occupant) "."))
-        (log "missed.")))))
+        (do (log " hit " (name occupant) ".")
+          (deal-damage occupant 10)
+        (log "missed."))))))
 
 (defn fire-bullet
   "Fire a bullet. The bullet will travel in a straight line until it hits a
 tank or a wall, and damage decreases with distance, starting at double the size
 of the map and decreasing by 2 every square (i.e. on a size 10 board,
-shooting an immidiately adjecent tank will do 18 damage)."
+shooting an immidiately adjecent tank will do 18 damage).
+Energy cost is constant."
   [tank direction]
   (do-tank-action
     tank (energy-constants :fire-bullet) (time-costs :fire-bullet)
@@ -306,15 +325,16 @@ shooting an immidiately adjecent tank will do 18 damage)."
             (log "hit the wall at " bullet-loc ".")
             (map? (deref' occupant))
             (do
-              (alter occupant update-in [:health] - damage)
-              (log "dealt " damage " damage to " (name occupant) "."))
+              (deal-damage occupant damage)
+              (log "hit " (name occupant) "."))
             :default
             (recur (- damage 2) (new-location bullet-loc direction))))))))
 
 (defn repair
   "Repairs some damage to a tank. The health of the tank cannot exceed 100,
 but energy will still be consumed for unused repairs. It is recommended to use
-the health function to obtain the current health of your tank."
+the health function to obtain the current health of your tank.
+Energy cost scales with the amount of damage repaired."
   [tank damage]
   (do-tank-action
     tank (* (energy-constants :repair) damage) (time-costs :repair)
@@ -323,8 +343,21 @@ the health function to obtain the current health of your tank."
 
 (defn recharge
   "Go dormant for some number of time units in order to regain energy.
-The more time spent dormant, the more energy gained."
+Energy gained scales with time spent dormant."
   [tank time-units]
   (do-tank-action
     tank (* (energy-constants :recharge) time-units) time-units
     (log (name tank) " recharged for " time-units " time units.")))
+
+(defn activate-shield
+  "Activate a shield that blocks some portion of damage (between 0 and 1)
+for some amount of time units. Energy cost scales with the number of time units
+divided by 1 minus the portion of damage blocked."
+  [tank time-units portion]
+  (when (< 0 portion 1)
+    (when (do-tank-action
+           tank (* (energy-constants :activate-shield) time-units (/ (- 1 portion)))
+           (time-costs :activate-shield)
+           (alter tank update-in [:shield] #(- 1 (* (- 1 %) portion))))
+      (future (Thread/sleep (* time-units timescale))
+        (dosync (alter tank update-in [:shield] #(+ (/ (- % 1) portion) 1)))))))
