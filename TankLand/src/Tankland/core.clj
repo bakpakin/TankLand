@@ -183,6 +183,14 @@ The resulting function will be public."
   [[r1 c1] [r2 c2]]
   (min (Math/abs (- r1 r2)) (Math/abs (- c1 c2))))
 
+(def ^:const energy-constants
+  {:move 0 :place-mine 0 :defuse-mine 0 :scan-line 0 :scan-area 0
+   :fire-artillery 0 :fire-bullet 0 :repair 0 :recharge -10})
+
+(def ^:const time-costs
+  {:move 1 :place-mine 1 :defuse-mine 1 :scan-line 1 :scan-area 1
+   :fire-artillery 1 :fire-bullet 1 :repair 1 :recharge "N/A"})
+
 ; Begin tank helper functions
 
 (defaccessor "health")
@@ -200,7 +208,7 @@ The resulting function will be public."
 Costs 1000 energy and takes 1 time unit, even if there is an obstruction."
   [tank direction]
   (do-tank-action
-    tank 0 1
+    tank (energy-constants :move) (time-costs :move)
     (let [old-loc (location tank)
           new-loc (new-location old-loc direction)
           occupant #(deref' (get-cell new-loc))]
@@ -223,7 +231,7 @@ If there is already a mine there, the mines will combine.
 If there is a tank there, the mine will detonate instantly."
   [tank damage direction]
   (do-tank-action
-    tank (* 0 damage) 1
+    tank (* (energy-constants :place-mine) damage) (time-costs :place-mine)
     (let [mine-loc (new-location (location tank) direction)
           occupant (get-cell mine-loc)]
       (log (name tank) " placed a " damage "-damage mine at " mine-loc ".")
@@ -240,7 +248,7 @@ If there is a tank there, the mine will detonate instantly."
 Uses energy even if there is not a mine."
   [tank direction]
   (do-tank-action
-    tank 0 0
+    tank (energy-constants :defuse-mine) (time-costs :defuse-mine)
     (let [defuse-loc (new-location (location tank) direction)]
       (when (number? (deref' (get-cell defuse-loc)))
         (clear-cell defuse-loc)
@@ -252,7 +260,7 @@ Returns a map of the occupied scanned squares to their occupants,
 each of which will be either :tank, :mine, or :wall."
   [tank direction distance]
   (do-tank-action
-    tank (* 0 distance) 0
+    tank (* (energy-constants :scan-line) distance) (time-costs :scan-line)
     (->> (iterate #(new-location % direction) (location tank))
      rest (take distance)
      scan-cells)))
@@ -263,7 +271,7 @@ Returns a map of the occupied scanned squares to their occupants,
 each of which will be either :tank, :mine, or :wall."
   [tank radius]
   (do-tank-action
-    tank (* 0 radius radius) 0
+    tank (#(* % % %2) (energy-constants :scan-area) radius) (time-costs :scan-area)
     (scan-cells (area (location tank) radius))))
 
 (defn fire-artillery
@@ -271,7 +279,8 @@ each of which will be either :tank, :mine, or :wall."
 Does 10 damage if it hits a tank."
   [tank target]
   (do-tank-action
-    tank (* 0 (distance (location tank) target)) 0
+    tank (* (energy-constants :fire-artillery) (distance (location tank) target))
+    (time-costs :fire-artillery)
     (let [occupant (get-cell target)
           log (partial log (name tank) " fired artillery at " target " and ")]
       (if (map? (deref' occupant))
@@ -279,13 +288,36 @@ Does 10 damage if it hits a tank."
           (log " hit " (name occupant) "."))
         (log "missed.")))))
 
+(defn fire-bullet
+  "Fire a bullet. The bullet will travel in a straight line until it hits a
+tank or a wall, and damage decreases with distance, starting at double the size
+of the map and decreasing by 2 every square (i.e. on a size 10 board,
+shooting an immidiately adjecent tank will do 18 damage)."
+  [tank direction]
+  (do-tank-action
+    tank (energy-constants :fire-bullet) (time-costs :fire-bullet)
+    (let [log (partial log (name tank) " shot "
+                       (clojure.core/name direction) " and ")] 
+      (loop [damage (- (* 2 size) 2)
+             bullet-loc (new-location (location tank) direction)]
+        (let [occupant (get-cell bullet-loc)]
+          (cond
+            (= :wall occupant)
+            (log "hit the wall at " bullet-loc ".")
+            (map? (deref' occupant))
+            (do
+              (alter occupant update-in [:health] - damage)
+              (log "dealt " damage " damage to " (name occupant) "."))
+            :default
+            (recur (- damage 2) (new-location bullet-loc direction))))))))
+
 (defn repair
   "Repairs some damage to a tank. The health of the tank cannot exceed 100,
 but energy will still be consumed for unused repairs. It is recommended to use
 the health function to obtain the current health of your tank."
   [tank damage]
   (do-tank-action
-    tank (* 0 damage) 0
+    tank (* (energy-constants :repair) damage) (time-costs :repair)
     (alter tank update-in [:health] #(min 100 (+ damage %)))
     (log (name tank) " repaired " damage " damage.")))
 
@@ -294,5 +326,5 @@ the health function to obtain the current health of your tank."
 The more time spent dormant, the more energy gained."
   [tank time-units]
   (do-tank-action
-    tank (* -10 time-units) time-units
+    tank (* (energy-constants :recharge) time-units) time-units
     (log (name tank) " recharged for " time-units " time units.")))
