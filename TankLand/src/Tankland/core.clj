@@ -400,13 +400,16 @@ Energy gained scales with time spent dormant."
 for some amount of time units. Energy cost scales with the number of time units
 divided by 1 minus the portion of damage blocked."
   [tank time-units portion]
-  (when (< 0 portion 1)
-    (when (do-tank-action
-            tank (* (energy-constants :activate-shield) time-units (/ (- 1 portion)))
-            (time-costs :activate-shield)
-            (alter tank update-in [:shield] #(- 1 (* (- 1 %) portion))))
-      (future (Thread/sleep (* time-units timescale))
-        (dosync (alter tank update-in [:shield] #(+ (/ (- % 1) portion) 1)))))))
+  (let [portion (rationalize portion)]
+    (when (< 0 portion 1)
+      (when (do-tank-action
+              tank (* (energy-constants :activate-shield) time-units (/ (- 1 portion)))
+              (time-costs :activate-shield)
+              (alter tank update-in [:shield] #(- 1 (* (- 1 %) portion))))
+        (do-graphics @board)
+        (future (Thread/sleep (* time-units timescale))
+          (dosync (alter tank update-in [:shield] #(+ (/ (- % 1) portion) 1)))
+          (do-graphics @board))))))
 
 (defn store-information
   "Stores information in the tank's memory at the given key.
