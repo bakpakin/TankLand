@@ -16,10 +16,10 @@
 ;to add images, put them in the classpath and load them as done below
 (def images
   {:tank (load-image "tankgui/tank.png")
-   :tankshield (load-image "tankgui/tankshield.png")
    :mine (load-image "tankgui/mine.png")
    :other (load-image "tankgui/qmark.png")
    :wall (load-image "tankgui/wall.png")
+   :tankshield (load-image "tankgui/tankshield.png")
    })
 
 (defn- draw-cells
@@ -32,7 +32,7 @@
                (not (instance? clojure.lang.IReference val)) (images :other)
                (= :wall @val) (images :wall)
                (number? @val) (images :mine)
-               (map? @val) (images :tank)
+               (map? @val) (if (> (@val :shield) 0) (images :tankshield) (images :tank))
                true (images :other)
                )
              (inc (int (* x cell-size)))
