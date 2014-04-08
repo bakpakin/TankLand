@@ -3,7 +3,17 @@
 
 (def ^:const size 10)
 (def ^:const wrap false)
+(def ^:const energy-constants
+  {:move 0 :place-mine 0 :defuse-mine 0 :scan-line 0 :scan-area 0
+   :fire-artillery 0 :fire-bullet 0 :repair 0 :recharge -10
+   :activate-shield 0})
+(def ^:const time-costs
+  {:move 1 :place-mine 1 :defuse-mine 1 :scan-line 1 :scan-area 1
+   :fire-artillery 1 :fire-bullet 1 :repair 1 :recharge "N/A"
+   :activate-shield 1})
 (def ^:private timescale 250)
+(def ^:private recharge-rate 1)
+
 (def ^:private board (ref {}))
 (def ^:private tanks (ref (sorted-map)))
 (def ^:private log-agent (agent []))
@@ -68,7 +78,8 @@ on the board, or there is another tank of the same name, returns nil."
   [name]
   (if (contains? @tanks name)
     (log "A tank already has the name " name ".")
-    (let [tank (ref {:name name :health 100 :energy (* size size 10) :shield 0})
+    (let [tank (ref {:name name :health 100 :energy (* size size 10)
+                     :shield 0 :information {}})
           tank-placed? (ref false)]
       (dosync (if-let [locations (seq (for [row (range size), col (range size)
                                             :let [location [row col]]
@@ -83,10 +94,8 @@ on the board, or there is another tank of the same name, returns nil."
       (when @tank-placed?
         (add-watch tank :death-watch tank-death-watch)
         (future (while (alive @tank) (Thread/sleep timescale)
-                  (dosync (alter tank update-in [:energy] + 1))))
+                  (dosync (alter tank update-in [:energy] + recharge-rate))))
         tank))))
-
-(declare name, energy, shield)
 
 (defn- run
   "Runs Tankland with one tank for each of the given behaviors."
@@ -97,14 +106,24 @@ on the board, or there is another tank of the same name, returns nil."
   (doseq [[name behavior-fn] info]
     (when (and (string? name) behavior-fn)
       (if-let [tank (add-tank name)]
-        (future (while (alive @tank) (behavior-fn tank)))
-        (log name " started.")))))
+        (future (while (alive @tank)
+                  (try (behavior-fn tank)
+                    (catch Exception e
+                      (dosync (alter tank assoc :health 0)
+                        (log "The creators of " name " lose one year point."))))))
+        (log name " started."))))
+  (add-watch tanks :victory
+             #(when (and (= (count %4) 1) (> (count %3) 1))
+                (let [message (str  (first (keys @tanks)) " wins!")]
+                  (log message)
+                  (future (javax.swing.JOptionPane/showMessageDialog
+                            nil message)))))
+  nil)
 
 (defn- kill-all-tanks
   "KILL. ALL. THE. TANKS."
   []
-  (doseq [tank (vals @tanks)]
-    (dosync (alter tank assoc :health 0))))
+  (dosync (doseq [tank (vals @tanks)] (alter tank assoc :health 0))))
 
 (defmacro ^:private with-relative-time
   "Causes the body to take an amount of time equal to
@@ -114,6 +133,8 @@ on the board, or there is another tank of the same name, returns nil."
          val# ~@body]
      (while (> end-time# (System/currentTimeMillis)))
      val#))
+
+(declare name, energy, shield)
 
 (defn- use-energy
   "Deplete a tank's energy by some amount,
@@ -196,16 +217,6 @@ The resulting function will be public."
       (alter tank update-in [:health] - damage)
       (log (name tank) " took " damage " damage."))))
 
-(def ^:const energy-constants
-  {:move 0 :place-mine 0 :defuse-mine 0 :scan-line 0 :scan-area 0
-   :fire-artillery 0 :fire-bullet 0 :repair 0 :recharge -10
-   :activate-shield 0})
-
-(def ^:const time-costs
-  {:move 1 :place-mine 1 :defuse-mine 1 :scan-line 1 :scan-area 1
-   :fire-artillery 1 :fire-bullet 1 :repair 1 :recharge "N/A"
-   :activate-shield 1})
-
 ; Begin tank helper functions
 
 (defaccessor "health")
@@ -230,7 +241,7 @@ Energy cost is constant."
           new-loc (new-location old-loc direction)
           occupant #(deref' (get-cell new-loc))]
       (when (number? (occupant))
-        (log (name tank) "hit a mine while moving to " new-loc ".")
+        (log (name tank) " hit a mine while moving to " new-loc ".")
         (deal-damage tank (occupant))
         (clear-cell new-loc))
       (if (nil? (occupant))
@@ -361,3 +372,19 @@ divided by 1 minus the portion of damage blocked."
            (alter tank update-in [:shield] #(- 1 (* (- 1 %) portion))))
       (future (Thread/sleep (* time-units timescale))
         (dosync (alter tank update-in [:shield] #(+ (/ (- % 1) portion) 1)))))))
+
+(defn store-information
+  "Stores information in the tank's memory at the given key.
+Has no time or energy cost. The information can be retrieved with get-information."
+  [tank key information]
+  (dosync (alter tank assoc-in [:information key] information)))
+
+(defn delete-information
+  "Deletes the information stored in the tanks memory at the given key."
+  [tank key]
+  (dosync (alter tank #(assoc % :information (dissoc (:information %) key)))))
+
+(defn get-information
+  "Gets the information stored in the tank's memory. Has no time or energy cost."
+  [tank]
+  (:information @tank))
