@@ -1,8 +1,11 @@
 (ns Tankland.core
+  [:refer-clojure :exclude [name]]
   [:use [tankgui.tankgui :only [init-graphics do-graphics]]])
 
 (def ^:const size 10)
 (def ^:const wrap false)
+(def ^:private ^:const starting-energy 1000)
+(def ^:const max-energy (* 2 starting-energy))
 (def ^:const energy-constants
   {:move 0 :place-mine 0 :defuse-mine 0 :scan-line 0 :scan-area 0
    :fire-artillery 0 :fire-bullet 0 :repair 0 :recharge -10
@@ -33,9 +36,9 @@ Can safely be called in a transaction."
   [& message]
   (let [message (apply str message)]
     (send log-agent #(do (println message)
-            (conj % {:timestamp (System/currentTimeMillis)
-                     :message message
-                     :game-state (deref-walk {:board board :tanks tanks})})))))
+                       (conj % {:timestamp (System/currentTimeMillis)
+                                :message message
+                                :game-state (deref-walk {:board board :tanks tanks})})))))
 
 (defn- print-full-log
   "Prints the log in a human-readable form."
@@ -66,7 +69,7 @@ The value of the tank should be passed, not the ref."
   "A watch function that will remove a tank from the board
 if its health drops to 0 or less."
   [key ref old-state new-state]
-  (when (not (alive new-state))
+  (when (and (not (alive new-state)) (alive old-state))
     (dosync
       (clear-cell (:location new-state))
       (alter tanks dissoc (:name new-state))
@@ -78,7 +81,7 @@ on the board, or there is another tank of the same name, returns nil."
   [name]
   (if (contains? @tanks name)
     (log "A tank already has the name " name ".")
-    (let [tank (ref {:name name :health 100 :energy (* size size 10)
+    (let [tank (ref {:name name :health 100 :energy starting-energy
                      :shield 0 :information {}})
           tank-placed? (ref false)]
       (dosync (if-let [locations (seq (for [row (range size), col (range size)
@@ -94,31 +97,63 @@ on the board, or there is another tank of the same name, returns nil."
       (when @tank-placed?
         (add-watch tank :death-watch tank-death-watch)
         (future (while (alive @tank) (Thread/sleep timescale)
-                  (dosync (alter tank update-in [:energy] + recharge-rate))))
+                  (dosync (alter tank update-in [:energy]
+                                 #(min (+ % recharge-rate) max-energy)))))
         tank))))
 
 (defn- run
-  "Runs Tankland with one tank for each of the given behaviors."
+  "Runs Tankland with one tank for each of the given behaviors.
+Assumes that all arguments are legal tanks."
   [& info]
   (init-graphics size)
   (do-graphics @board) ; just in case there are already things on the board
   (add-watch board :graphics #(do-graphics %4))
   (doseq [[name behavior-fn] info]
-    (when (and (string? name) behavior-fn)
-      (if-let [tank (add-tank name)]
-        (future (while (alive @tank)
-                  (try (behavior-fn tank)
-                    (catch Exception e
-                      (dosync (alter tank assoc :health 0)
-                        (log "The creators of " name " lose one year point."))))))
-        (log name " started."))))
+    (if-let [tank (add-tank name)]
+      (future (try (while (alive @tank)
+                     (behavior-fn tank))
+                (catch Exception e
+                  (dosync (alter tank assoc :health 0)
+                    (log (.getMessage e))
+                    (log "The creators of " name " lose one year point.")))))
+      (log name " started.")))
   (add-watch tanks :victory
              #(when (and (= (count %4) 1) (> (count %3) 1))
-                (let [message (str  (first (keys @tanks)) " wins!")]
+                (let [message (str  (first (keys %4)) " wins!")]
                   (log message)
                   (future (javax.swing.JOptionPane/showMessageDialog
                             nil message)))))
   nil)
+
+(defn- legal-tank?
+  "Checks whether a tank is legal."
+  [[name behavior-fn]]
+  (and (string? name)
+       (not-any? #{`deref 'deref 'dosync}
+                 (flatten behavior-fn))
+       (try (let [temp (gensym "ns")]
+              (with-bindings {#'*ns* (create-ns temp)}
+                (refer-clojure :exclude ['name])
+                (refer 'Tankland.core)
+                (eval behavior-fn))
+              (remove-ns temp)
+              true)
+         (catch Exception e false))))
+
+(defn- run-from-file
+  "Runs Tankland with tanks read in from a file. The file should start with
+( and end with )."
+  [file-name]
+  (try
+    (let [tanks (with-bindings {#'*read-eval* false}
+                  (read-string (str \( (slurp file-name) \))))
+          legal-tanks (filter legal-tank? tanks)
+          illegal-count (- (count tanks) (count legal-tanks))]
+      (when (pos? illegal-count)
+        (javax.swing.JOptionPane/showMessageDialog
+          nil (str illegal-count " illegal tanks.")))
+      (apply run (map eval tanks)))
+    (catch Exception e (println "Error reading tanks from file."))))
 
 (defn- kill-all-tanks
   "KILL. ALL. THE. TANKS."
@@ -250,7 +285,7 @@ Energy cost is constant."
           (clear-cell old-loc)
           (log (name tank) " moved from " old-loc " to " new-loc "."))
         (log (name tank) " was blocked when trying to move from "
-                  old-loc " to " new-loc ".")))))
+             old-loc " to " new-loc ".")))))
 
 (defn place-mine
   "Place a mine that does the given amount of damage
@@ -290,8 +325,8 @@ Energy cost scales with the distance."
   (do-tank-action
     tank (* (energy-constants :scan-line) distance) (time-costs :scan-line)
     (->> (iterate #(new-location % direction) (location tank))
-     rest (take distance)
-     scan-cells)))
+      rest (take distance)
+      scan-cells)))
 
 (defn scan-area
   "Scan an area of the given radius around the tank.
@@ -315,7 +350,7 @@ tank. Energy cost scales with the distance of the target."
       (if (map? (deref' occupant))
         (do (log " hit " (name occupant) ".")
           (deal-damage occupant 10)
-        (log "missed."))))))
+          (log "missed."))))))
 
 (defn fire-bullet
   "Fire a bullet. The bullet will travel in a straight line until it hits a
@@ -365,13 +400,16 @@ Energy gained scales with time spent dormant."
 for some amount of time units. Energy cost scales with the number of time units
 divided by 1 minus the portion of damage blocked."
   [tank time-units portion]
-  (when (< 0 portion 1)
-    (when (do-tank-action
-           tank (* (energy-constants :activate-shield) time-units (/ (- 1 portion)))
-           (time-costs :activate-shield)
-           (alter tank update-in [:shield] #(- 1 (* (- 1 %) portion))))
-      (future (Thread/sleep (* time-units timescale))
-        (dosync (alter tank update-in [:shield] #(+ (/ (- % 1) portion) 1)))))))
+  (let [portion (rationalize portion)]
+    (when (< 0 portion 1)
+      (when (do-tank-action
+              tank (* (energy-constants :activate-shield) time-units (/ (- 1 portion)))
+              (time-costs :activate-shield)
+              (alter tank update-in [:shield] #(- 1 (* (- 1 %) portion))))
+        (do-graphics @board)
+        (future (Thread/sleep (* time-units timescale))
+          (dosync (alter tank update-in [:shield] #(+ (/ (- % 1) portion) 1)))
+          (do-graphics @board))))))
 
 (defn store-information
   "Stores information in the tank's memory at the given key.
