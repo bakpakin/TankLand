@@ -175,6 +175,11 @@
   ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
 
+(defn graphics-frame
+  "Returns the graphics JFrame."
+  []
+  @(viewervar :frame))
+
 (defn do-graphics
   "Updates the gui to show the current board."
   [board]
