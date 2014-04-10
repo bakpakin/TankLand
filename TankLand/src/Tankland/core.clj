@@ -1,6 +1,6 @@
 (ns Tankland.core
   [:refer-clojure :exclude [name]]
-  [:use [tankgui.tankgui :only [init-graphics do-graphics]]])
+  [:use [tankgui.tankgui :only [init-graphics do-graphics do-board do-tanks]]])
 
 (def ^:const size 10)
 (def ^:const wrap false)
@@ -106,8 +106,9 @@ on the board, or there is another tank of the same name, returns nil."
 Assumes that all arguments are legal tanks."
   [& info]
   (init-graphics size)
-  (do-graphics @board) ; just in case there are already things on the board
-  (add-watch board :graphics #(do-graphics %4))
+  (do-graphics @board @tanks) ; just in case there are already things on the board
+  (add-watch board :graphics #(do-board %4))
+  (add-watch tanks :tanks #(do-tanks %4))
   (doseq [[name behavior-fn] info]
     (if-let [tank (add-tank name)]
       (future (try (while (alive @tank)
