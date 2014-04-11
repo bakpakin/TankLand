@@ -14,7 +14,9 @@
   (:import javax.swing.JLabel)
   (:import javax.swing.BoxLayout)
   (:import javax.swing.border.BevelBorder)
-  (:import javax.swing.JViewport))
+  (:import javax.swing.JViewport)
+  (:import javax.swing.JEditorPane)
+  (:import java.io.PrintWriter))
 
 (defn- load-image
   [classpath]
@@ -100,28 +102,24 @@
     (.setBackground panel Color/WHITE)
     panel))
 
-(defn tank-cell-renderer
-  "Makes a ListCellRender for tanks."
-  []
-  (proxy [javax.swing.ListCellRenderer]
+(def cell-renderer (proxy [javax.swing.ListCellRenderer]
     []
     (getListCellRendererComponent [list value index is-selected cell-has-focus]
-        (let [panel (new JPanel)]
-          (doto panel
-             (.setLayout (new BoxLayout panel BoxLayout/Y_AXIS))
-             (.add (new JLabel (str (:name value)))) 
-             (.add (new JLabel (str "Health: " (:health value)))) 
-             (.add (new JLabel (str "Energy: " (:energy value))))
-             (.setBorder (new BevelBorder BevelBorder/RAISED)))
-          (if is-selected (.setBackground panel Color/BLUE))
-          panel)
-        )))
+          (let [panel (new JPanel)]
+            (doto panel
+                         (.setLayout (new BoxLayout panel BoxLayout/Y_AXIS))
+                         (.add (new JLabel (str (:name value)))) 
+                         (.add (new JLabel (str "Health: " (:health value)))) 
+                         (.add (new JLabel (str "Energy: " (:energy value))))
+                         (.setBorder (new BevelBorder BevelBorder/RAISED))
+             (.setBackground (if is-selected Color/BLUE Color/WHITE)))
+             panel))))
 
 (defn- make-tank-panel
   [viewer]
   (doto (new JList)
     (.setModel (new DefaultListModel))
-    (.setCellRenderer (tank-cell-renderer))
+    (.setCellRenderer cell-renderer)
   ))
 
 (defn add-drag-control
@@ -189,6 +187,7 @@
         :tanks (atom {})
         :display-panel (atom nil)
         :display-scroll (atom nil)
+        :console (atom nil)
         :tank-panel (atom nil)
         :frame (atom nil)
         :cell-size (atom cell-size)
@@ -201,16 +200,20 @@
         }
         panel (make-panel viewer)
         tank-panel (make-tank-panel viewer)
-        frame (new JFrame)
+        frame (new JFrame "Tankland - A Tank Simulation in Clojure")
         scroll (new JScrollPane panel)
-        splitPane (new JSplitPane JSplitPane/HORIZONTAL_SPLIT scroll (new JScrollPane tank-panel))]
+        console (new JEditorPane)
+        splitPane (new JSplitPane JSplitPane/HORIZONTAL_SPLIT scroll (new JScrollPane tank-panel))
+        vSplitPane (new JSplitPane JSplitPane/VERTICAL_SPLIT splitPane (new JScrollPane console))]
   (reset! (viewer :display-panel) panel)
   (reset! (viewer :tank-panel) tank-panel)
   (reset! (viewer :frame) frame)
   (reset! (viewer :display-scroll) scroll)
+  (reset! (viewer :console) console)
   (.setContinuousLayout splitPane true)
+  (.setContinuousLayout vSplitPane true)
   (doto frame 
-      (.setContentPane splitPane) 
+      (.setContentPane vSplitPane) 
       .pack 
       (.setVisible true))
   viewer))
@@ -229,17 +232,21 @@
   (reset! (viewer :tanks) tanks)
   (let [tp @(viewer :tank-panel)
         lm (new DefaultListModel)]
-    (.setModel tp lm)
     (doseq [[name tank] tanks]
       (.addElement lm @tank)
     )
+    (.setModel tp lm)
+  (.revalidate tp)
   (.repaint tp)))
 
 (defn init-graphics
   "Initilaizes the gui with a board of specified height and width."
   ([width height]
   (def ^:private viewervar (make-viewer 64 width height))
-  (add-zoom-control viewervar))
+  (add-zoom-control viewervar)
+  (if (or (= -1 width) (= -1 height))
+    (add-drag-control viewervar)
+    ))
   ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
 

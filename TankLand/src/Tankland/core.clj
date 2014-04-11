@@ -31,7 +31,7 @@
     x))
 
 (defn- log
-  "Logs a the string concatenation of message.
+  "Logs the string concatenation of message.
 Can safely be called in a transaction."
   [& message]
   (let [message (apply str message)]
