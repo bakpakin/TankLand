@@ -1,6 +1,6 @@
 (ns Tankland.core
   [:refer-clojure :exclude [name]]
-  [:use [tankgui.tankgui :only [init-graphics do-graphics do-board do-tanks]]])
+  [:use [tankgui.tankgui :only [init-graphics do-graphics do-board do-tanks log-message]]])
 
 (def ^:const size 10)
 (def ^:const wrap false)
@@ -35,7 +35,7 @@
 Can safely be called in a transaction."
   [& message]
   (let [message (apply str message)]
-    (send log-agent #(do (println message)
+    (send log-agent #(do (log-message message)
                        (conj % {:timestamp (System/currentTimeMillis)
                                 :message message
                                 :game-state (deref-walk {:board board :tanks tanks})})))))

@@ -16,7 +16,8 @@
   (:import javax.swing.border.BevelBorder)
   (:import javax.swing.JViewport)
   (:import javax.swing.JEditorPane)
-  (:import java.io.PrintWriter))
+  (:import java.io.PrintWriter)
+  (:import javax.swing.text.PlainDocument))
 
 (defn- load-image
   [classpath]
@@ -187,7 +188,7 @@
         :tanks (atom {})
         :display-panel (atom nil)
         :display-scroll (atom nil)
-        :console (atom nil)
+        :document (atom nil)
         :tank-panel (atom nil)
         :frame (atom nil)
         :cell-size (atom cell-size)
@@ -204,12 +205,14 @@
         scroll (new JScrollPane panel)
         console (new JEditorPane)
         splitPane (new JSplitPane JSplitPane/HORIZONTAL_SPLIT scroll (new JScrollPane tank-panel))
-        vSplitPane (new JSplitPane JSplitPane/VERTICAL_SPLIT splitPane (new JScrollPane console))]
+        vSplitPane (new JSplitPane JSplitPane/VERTICAL_SPLIT splitPane (new JScrollPane console))
+        document (new PlainDocument)]
   (reset! (viewer :display-panel) panel)
   (reset! (viewer :tank-panel) tank-panel)
   (reset! (viewer :frame) frame)
   (reset! (viewer :display-scroll) scroll)
-  (reset! (viewer :console) console)
+  (reset! (viewer :document) document)
+  (.setDocument console document)
   (.setContinuousLayout splitPane true)
   (.setContinuousLayout vSplitPane true)
   (doto frame 
@@ -236,7 +239,7 @@
       (.addElement lm @tank)
     )
     (.setModel tp lm)
-  (.revalidate tp)
+  (.invalidate tp)
   (.repaint tp)))
 
 (defn init-graphics
@@ -249,6 +252,17 @@
     ))
   ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
+
+(defn log-to-viewer
+  "Logs a message to the console."
+  [viewer message]
+  (let [doc @(viewer :document)]
+    (.insertString doc (.getLength doc) (str message "\n") nil)))
+
+(defn log-message
+  "Logs a message."
+  [message]
+  (log-to-viewer viewervar message))
 
 (defn graphics-frame
   "Returns the graphics JFrame."
