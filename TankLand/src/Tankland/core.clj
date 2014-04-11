@@ -4,7 +4,7 @@
 
 (def ^:const size 10)
 (def ^:const wrap false)
-(def ^:private ^:const starting-energy 1000)
+(def ^:const starting-energy 1000)
 (def ^:const max-energy (* 2 starting-energy))
 (def ^:const energy-constants
   {:move 0 :place-mine 0 :defuse-mine 0 :scan-line 0 :scan-area 0
@@ -206,10 +206,10 @@ and executes the body in a dosync with the relative time cost."
   "Defines an accessor function for the tank attribute of the same name.
 The resulting function will be public."
   [attr]
-  `(defn ~(symbol attr)
+  `(defn ~attr
      ~(str "Gets the " attr " of the tank. Costs no energy.")
      [~'tank]
-     (~(keyword attr) (deref ~'tank))))
+     (~(keyword (str attr)) (deref ~'tank))))
 
 (defn- occupant-type
   "Returns the type of a cell occupant, nil, :tank, :mine, :wall, or :other."
@@ -254,11 +254,11 @@ The resulting function will be public."
 
 ; Begin tank helper functions
 
-(defaccessor "health")
-(defaccessor "energy")
-(defaccessor "name")
-(defaccessor "location")
-(defaccessor "shield")
+(defaccessor health)
+(defaccessor energy)
+(defaccessor name)
+(defaccessor location)
+(defaccessor shield)
 
 (defn rand-direction
   "Selects a random direction."
