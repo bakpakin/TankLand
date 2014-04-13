@@ -189,6 +189,7 @@
         :display-panel (atom nil)
         :display-scroll (atom nil)
         :document (atom nil)
+        :doc-scroll (atom nil)
         :tank-panel (atom nil)
         :frame (atom nil)
         :cell-size (atom cell-size)
@@ -204,10 +205,12 @@
         frame (new JFrame "Tankland - A Tank Simulation in Clojure")
         scroll (new JScrollPane panel)
         console (new JEditorPane)
+        doc-scroll (doto (new JScrollPane console) (.setMinimumSize (new Dimension 300 200)))
         splitPane (new JSplitPane JSplitPane/HORIZONTAL_SPLIT scroll (new JScrollPane tank-panel))
-        vSplitPane (new JSplitPane JSplitPane/VERTICAL_SPLIT splitPane (new JScrollPane console))
+        vSplitPane (new JSplitPane JSplitPane/VERTICAL_SPLIT splitPane doc-scroll)
         document (new PlainDocument)]
   (reset! (viewer :display-panel) panel)
+  (reset! (viewer :doc-scroll) doc-scroll)
   (reset! (viewer :tank-panel) tank-panel)
   (reset! (viewer :frame) frame)
   (reset! (viewer :display-scroll) scroll)
@@ -256,8 +259,10 @@
 (defn log-to-viewer
   "Logs a message to the console."
   [viewer message]
-  (let [doc @(viewer :document)]
-    (.insertString doc (.getLength doc) (str message "\n") nil)))
+  (let [doc @(viewer :document)
+        bar (.getVerticalScrollBar @(viewer :doc-scroll))]
+    (.insertString doc (.getLength doc) (str message "\n") nil)
+    (.setValue bar (.getMaximum bar))))
 
 (defn log-message
   "Logs a message."

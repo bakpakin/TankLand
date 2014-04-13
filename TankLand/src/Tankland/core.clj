@@ -36,7 +36,7 @@
 Can safely be called in a transaction."
   [& message]
   (let [message (apply str message)]
-    (send log-agent #(do (println message)
+    (send log-agent #(do (log-message message)
                        (conj % {:timestamp (System/currentTimeMillis)
                                 :message message
                                 :game-state (deref-walk {:board board
