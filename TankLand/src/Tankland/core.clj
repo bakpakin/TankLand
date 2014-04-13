@@ -1,10 +1,11 @@
 (ns Tankland.core
   [:refer-clojure :exclude [name]]
-  [:use [tankgui.tankgui :only [init-graphics do-graphics do-board do-tanks log-message]]])
+  [:require [clojure.java.io :as io]]
+  [:use tankgui.tankgui])
 
 (def ^:const size 10)
 (def ^:const wrap false)
-(def ^:private ^:const starting-energy 1000)
+(def ^:const starting-energy 1000)
 (def ^:const max-energy (* 2 starting-energy))
 (def ^:const energy-constants
   {:move 0 :place-mine 0 :defuse-mine 0 :scan-line 0 :scan-area 0
@@ -35,16 +36,22 @@
 Can safely be called in a transaction."
   [& message]
   (let [message (apply str message)]
-    (send log-agent #(do (log-message message)
+    (send log-agent #(do (println message)
                        (conj % {:timestamp (System/currentTimeMillis)
                                 :message message
-                                :game-state (deref-walk {:board board :tanks tanks})})))))
+                                :game-state (deref-walk {:board board
+                                                         :tanks tanks})})))))
 
 (defn- print-full-log
   "Prints the log in a human-readable form."
   []
   (doseq [message @log-agent]
     (println "At" (:timestamp message) (:message message))))
+
+(defn- show-message
+  "Pops up a message in the GUI."
+  [message]
+  (javax.swing.JOptionPane/showMessageDialog (graphics-frame) message))
 
 (defn- get-cell
   "Gets the occupant of a cell on the board. Returns nil if cell is empty.
@@ -106,24 +113,25 @@ on the board, or there is another tank of the same name, returns nil."
 Assumes that all arguments are legal tanks."
   [& info]
   (init-graphics size)
-  (do-graphics @board @tanks) ; just in case there are already things on the board
-  (add-watch board :graphics #(do-board %4))
-  (add-watch tanks :tanks #(do-tanks %4))
+  (future (while true
+            (do-graphics @board)
+              (Thread/sleep 33)))
+  (future (while true
+            (do-tanks @tanks)
+              (Thread/sleep timescale)))
   (doseq [[name behavior-fn] info]
     (if-let [tank (add-tank name)]
       (future (try (while (alive @tank)
                      (behavior-fn tank))
                 (catch Exception e
                   (dosync (alter tank assoc :health 0)
-                    (log (.getMessage e))
                     (log "The creators of " name " lose one year point.")))))
       (log name " started.")))
   (add-watch tanks :victory
              #(when (and (= (count %4) 1) (> (count %3) 1))
                 (let [message (str  (first (keys %4)) " wins!")]
                   (log message)
-                  (future (javax.swing.JOptionPane/showMessageDialog
-                            nil message)))))
+                  (future (show-message message)))))
   nil)
 
 (defn- legal-tank?
@@ -141,20 +149,23 @@ Assumes that all arguments are legal tanks."
               true)
          (catch Exception e false))))
 
-(defn- run-from-file
-  "Runs Tankland with tanks read in from a file. The file should start with
-( and end with )."
-  [file-name]
+(defn- run-from-files
+  "Runs Tankland with tanks read in from specified files. If no files are
+specified, uses every .tnk file in the present working directory."
+  ([& file-names]
   (try
     (let [tanks (with-bindings {#'*read-eval* false}
-                  (read-string (str \( (slurp file-name) \))))
+                  (read-string (str \( (apply str (map slurp file-names)) \))))
           legal-tanks (filter legal-tank? tanks)
           illegal-count (- (count tanks) (count legal-tanks))]
       (when (pos? illegal-count)
-        (javax.swing.JOptionPane/showMessageDialog
-          nil (str illegal-count " illegal tanks.")))
+        (show-message (str illegal-count " illegal tanks.")))
       (apply run (map eval tanks)))
     (catch Exception e (println "Error reading tanks from file."))))
+  ([] (apply run-from-files
+             (filter #(.endsWith % ".tnk")
+                     (map #(.getName %)
+                          (file-seq (io/file ".")))))))
 
 (defn- kill-all-tanks
   "KILL. ALL. THE. TANKS."
@@ -207,10 +218,10 @@ and executes the body in a dosync with the relative time cost."
   "Defines an accessor function for the tank attribute of the same name.
 The resulting function will be public."
   [attr]
-  `(defn ~(symbol attr)
+  `(defn ~attr
      ~(str "Gets the " attr " of the tank. Costs no energy.")
      [~'tank]
-     (~(keyword attr) (deref ~'tank))))
+     (~(keyword (str attr)) (deref ~'tank))))
 
 (defn- occupant-type
   "Returns the type of a cell occupant, nil, :tank, :mine, :wall, or :other."
@@ -255,11 +266,11 @@ The resulting function will be public."
 
 ; Begin tank helper functions
 
-(defaccessor "health")
-(defaccessor "energy")
-(defaccessor "name")
-(defaccessor "location")
-(defaccessor "shield")
+(defaccessor health)
+(defaccessor energy)
+(defaccessor name)
+(defaccessor location)
+(defaccessor shield)
 
 (defn rand-direction
   "Selects a random direction."
