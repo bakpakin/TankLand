@@ -1,6 +1,6 @@
 (ns Tankland.core
   [:refer-clojure :exclude [name]]
-  [:use [tankgui.tankgui :only [init-graphics do-graphics]]])
+  [:use [tankgui.tankgui]])
 
 (def ^:const size 10)
 (def ^:const wrap false)
@@ -31,7 +31,7 @@
     x))
 
 (defn- log
-  "Logs a the string concatenation of message.
+  "Logs the string concatenation of message.
 Can safely be called in a transaction."
   [& message]
   (let [message (apply str message)]
@@ -106,8 +106,12 @@ on the board, or there is another tank of the same name, returns nil."
 Assumes that all arguments are legal tanks."
   [& info]
   (init-graphics size)
-  (do-graphics @board) ; just in case there are already things on the board
-  (add-watch board :graphics #(do-graphics %4))
+  (future (while true
+            (do-graphics @board)
+              (Thread/sleep 33)))
+  (future (while true
+            (do-tanks @tanks)
+              (Thread/sleep timescale)))
   (doseq [[name behavior-fn] info]
     (if-let [tank (add-tank name)]
       (future (try (while (alive @tank)
@@ -122,7 +126,7 @@ Assumes that all arguments are legal tanks."
                 (let [message (str  (first (keys %4)) " wins!")]
                   (log message)
                   (future (javax.swing.JOptionPane/showMessageDialog
-                            nil message)))))
+                            (graphics-frame) message)))))
   nil)
 
 (defn- legal-tank?
@@ -151,7 +155,7 @@ Assumes that all arguments are legal tanks."
           illegal-count (- (count tanks) (count legal-tanks))]
       (when (pos? illegal-count)
         (javax.swing.JOptionPane/showMessageDialog
-          nil (str illegal-count " illegal tanks.")))
+          (graphics-frame) (str illegal-count " illegal tanks.")))
       (apply run (map eval tanks)))
     (catch Exception e (println "Error reading tanks from file."))))
 
