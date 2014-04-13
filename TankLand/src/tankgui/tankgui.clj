@@ -7,7 +7,17 @@
   (:import java.awt.event.MouseAdapter)
   (:import java.awt.event.ComponentAdapter)
   (:import javax.swing.JSplitPane)
-  (:import javax.swing.JList))
+  (:import javax.swing.JList)
+  (:import javax.swing.JScrollPane)
+  (:import javax.swing.DefaultListModel)
+  (:import javax.swing.ListCellRenderer)
+  (:import javax.swing.JLabel)
+  (:import javax.swing.BoxLayout)
+  (:import javax.swing.border.BevelBorder)
+  (:import javax.swing.JViewport)
+  (:import javax.swing.JEditorPane)
+  (:import java.io.PrintWriter)
+  (:import javax.swing.text.PlainDocument))
 
 (defn- load-image
   [classpath]
@@ -19,7 +29,11 @@
    :mine (load-image "tankgui/mine.png")
    :other (load-image "tankgui/qmark.png")
    :wall (load-image "tankgui/wall.png")
+   :tankshield (load-image "tankgui/tankshield.png")
    })
+
+(def max-cell-size 128)
+(def min-cell-size 32)
 
 (defn- draw-cells
   [g board cell-size]
@@ -31,14 +45,19 @@
                (not (instance? clojure.lang.IReference val)) (images :other)
                (= :wall @val) (images :wall)
                (number? @val) (images :mine)
-               (map? @val) (images :tank)
+               (map? @val) (if (> (@val :shield) 0) (images :tankshield) (images :tank))
                true (images :other)
                )
              (inc (int (* x cell-size)))
              (inc (int (* y cell-size)))
              (dec cell-size)
              (dec cell-size)
-             nil)))
+             nil)
+           (if (and (instance? clojure.lang.IReference val) (map? @val))
+             (do
+               (.setColor g Color/BLACK)
+               (.drawString g (:name @val) (int (+ (* x cell-size) 5)) (int (+ (* y cell-size) 15)))
+               ))))
 
 (defn- draw-grid
   [g width height cell-size]
@@ -66,14 +85,14 @@
 
 (defn- make-panel
   [viewer]
-  (let [panel (proxy [JPanel] [] (paint [g] 
-                                   (proxy-super paint g)
-                                   (.translate g @(viewer :x) @(viewer :y)) 
-                                   (if (or (= -1 @(viewer :width)) (= -1 @(viewer :height)))
-                                     (draw-grid-infinite g @(viewer :cell-size))
-                                     (draw-grid g @(viewer :width) @(viewer :height) @(viewer :cell-size))
-                                   )
-                                   (draw-cells g @(viewer :board) @(viewer :cell-size))))
+  (let [panel (proxy [JPanel] [] 
+                (paint [g] 
+                  (proxy-super paint g)
+                  (.translate g @(viewer :x) @(viewer :y)) 
+                  (if (or (= -1 @(viewer :width)) (= -1 @(viewer :height)))
+                    (draw-grid-infinite g @(viewer :cell-size))
+                    (draw-grid g @(viewer :width) @(viewer :height) @(viewer :cell-size)))
+                  (draw-cells g @(viewer :board) @(viewer :cell-size))))
         cs @(viewer :cell-size)
         w @(viewer :width)
         h @(viewer :height)]
@@ -84,11 +103,25 @@
     (.setBackground panel Color/WHITE)
     panel))
 
+(def cell-renderer (proxy [javax.swing.ListCellRenderer]
+    []
+    (getListCellRendererComponent [list value index is-selected cell-has-focus]
+          (let [panel (new JPanel)]
+            (doto panel
+                         (.setLayout (new BoxLayout panel BoxLayout/Y_AXIS))
+                         (.add (new JLabel (str (:name value)))) 
+                         (.add (new JLabel (str "Health: " (:health value)))) 
+                         (.add (new JLabel (str "Energy: " (:energy value))))
+                         (.setBorder (new BevelBorder BevelBorder/RAISED))
+             (.setBackground (if is-selected Color/BLUE Color/WHITE)))
+             panel))))
+
 (defn- make-tank-panel
   [viewer]
-  (let [panel (new JList)]
-    
-    panel))
+  (doto (new JList)
+    (.setModel (new DefaultListModel))
+    (.setCellRenderer cell-renderer)
+  ))
 
 (defn add-drag-control
   "Adds the ability to drag the camera in the viewer around."
@@ -118,7 +151,32 @@
               pw (.getWidth panel)
               ph (.getHeight panel)]
           (if (and (not= -1 w) (not= -1 h))
-            (reset! (viewer :cell-size) (min (/ pw w) (/ ph h)))))))))
+            (reset! (viewer :cell-size) (min (/ pw w) (/ ph h)))))
+        (.repaint @(viewer :display-scroll))))))
+
+
+(defn add-zoom-control
+  "Adds capability of the viewer to zoom with cursor."
+  [viewer]
+  (.addMouseWheelListener @(viewer :display-panel)
+    (proxy [MouseAdapter] [] 
+      (mouseWheelMoved [e]
+          (reset! 
+            (viewer :cell-size) 
+            (min max-cell-size (max min-cell-size (* 
+                                                    @(viewer :cell-size)
+                                                    (Math/pow 1.01 (.getPreciseWheelRotation e))))))
+      (let    
+        [panel @(viewer :display-panel)
+         cs @(viewer :cell-size)
+        w @(viewer :width)
+        h @(viewer :height)]
+    (if (or (= -1 w) (= -1 h))
+          (.setPreferredSize panel (new Dimension 800 600))
+          (.setPreferredSize panel (new Dimension (* cs w) (* cs h)))
+    ))
+       (.revalidate (.getViewport @(viewer :display-scroll)))
+          (.repaint @(viewer :display-scroll))))))
 
 (defn make-viewer
   "Makes a new viewer that displays a board of given width and height, 
@@ -129,6 +187,8 @@
         :board (atom {})
         :tanks (atom {})
         :display-panel (atom nil)
+        :display-scroll (atom nil)
+        :document (atom nil)
         :tank-panel (atom nil)
         :frame (atom nil)
         :cell-size (atom cell-size)
@@ -141,13 +201,22 @@
         }
         panel (make-panel viewer)
         tank-panel (make-tank-panel viewer)
-        frame (new JFrame)
-        splitPane (new JSplitPane JSplitPane/HORIZONTAL_SPLIT panel tank-panel)]
+        frame (new JFrame "Tankland - A Tank Simulation in Clojure")
+        scroll (new JScrollPane panel)
+        console (new JEditorPane)
+        splitPane (new JSplitPane JSplitPane/HORIZONTAL_SPLIT scroll (new JScrollPane tank-panel))
+        vSplitPane (new JSplitPane JSplitPane/VERTICAL_SPLIT splitPane (new JScrollPane console))
+        document (new PlainDocument)]
   (reset! (viewer :display-panel) panel)
   (reset! (viewer :tank-panel) tank-panel)
   (reset! (viewer :frame) frame)
+  (reset! (viewer :display-scroll) scroll)
+  (reset! (viewer :document) document)
+  (.setDocument console document)
+  (.setContinuousLayout splitPane true)
+  (.setContinuousLayout vSplitPane true)
   (doto frame 
-      (.setContentPane splitPane) 
+      (.setContentPane vSplitPane) 
       .pack 
       (.setVisible true))
   viewer))
@@ -158,23 +227,62 @@
   "Updates the board of the viewer. Also calls a repaint."
   [viewer board]
   (reset! (viewer :board) board)
-  (.repaint @(viewer :display-panel)))
+  (.repaint @(viewer :display-scroll)))
 
 (defn update-tank-panel
-  "Updates the tank information in the viewer. Also calls repaint."
+  "Updates the tank information in the viewer. Also calls a repaint."
   [viewer tanks]
   (reset! (viewer :tanks) tanks)
-  (.repaint @(viewer :tank-panel)))
+  (let [tp @(viewer :tank-panel)
+        lm (new DefaultListModel)]
+    (doseq [[name tank] tanks]
+      (.addElement lm @tank)
+    )
+    (.setModel tp lm)
+  (.invalidate tp)
+  (.repaint tp)))
 
 (defn init-graphics
   "Initilaizes the gui with a board of specified height and width."
   ([width height]
   (def ^:private viewervar (make-viewer 64 width height))
-  (add-resize-control viewervar))
+  (add-zoom-control viewervar)
+  (if (or (= -1 width) (= -1 height))
+    (add-drag-control viewervar)
+    ))
   ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
 
-(defn do-graphics
-  "Updates the gui to show the current board."
+(defn log-to-viewer
+  "Logs a message to the console."
+  [viewer message]
+  (let [doc @(viewer :document)]
+    (.insertString doc (.getLength doc) (str message "\n") nil)))
+
+(defn log-message
+  "Logs a message."
+  [message]
+  (log-to-viewer viewervar message))
+
+(defn graphics-frame
+  "Returns the graphics JFrame."
+  []
+  @(viewervar :frame))
+
+(defn do-board
+  "Updates the board."
   [board]
   (update-board viewervar board))
+
+(defn do-tanks
+  "Updates the tanks."
+  [tanks]
+  (update-tank-panel viewervar tanks))
+
+(defn do-graphics
+  "Updates the gui to show the current board."
+  ([board]
+  (update-board viewervar board))
+  ([board tanks]
+    (update-board viewervar board)
+    (update-tank-panel viewervar tanks)))

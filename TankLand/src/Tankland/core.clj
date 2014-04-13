@@ -39,13 +39,19 @@ Can safely be called in a transaction."
     (send log-agent #(do (println message)
                        (conj % {:timestamp (System/currentTimeMillis)
                                 :message message
-                                :game-state (deref-walk {:board board :tanks tanks})})))))
+                                :game-state (deref-walk {:board board
+                                                         :tanks tanks})})))))
 
 (defn- print-full-log
   "Prints the log in a human-readable form."
   []
   (doseq [message @log-agent]
     (println "At" (:timestamp message) (:message message))))
+
+(defn- show-message
+  "Pops up a message in the GUI."
+  [message]
+  (javax.swing.JOptionPane/showMessageDialog (graphics-frame) message))
 
 (defn- get-cell
   "Gets the occupant of a cell on the board. Returns nil if cell is empty.
@@ -125,8 +131,7 @@ Assumes that all arguments are legal tanks."
              #(when (and (= (count %4) 1) (> (count %3) 1))
                 (let [message (str  (first (keys %4)) " wins!")]
                   (log message)
-                  (future (javax.swing.JOptionPane/showMessageDialog
-                            (graphics-frame) message)))))
+                  (future (show-message message)))))
   nil)
 
 (defn- legal-tank?
@@ -154,8 +159,7 @@ specified, uses every .tnk file in the present working directory."
           legal-tanks (filter legal-tank? tanks)
           illegal-count (- (count tanks) (count legal-tanks))]
       (when (pos? illegal-count)
-        (javax.swing.JOptionPane/showMessageDialog
-          (graphics-frame) (str illegal-count " illegal tanks.")))
+        (show-message (str illegal-count " illegal tanks.")))
       (apply run (map eval tanks)))
     (catch Exception e (println "Error reading tanks from file."))))
   ([] (apply run-from-files

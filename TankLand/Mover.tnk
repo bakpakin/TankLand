@@ -1,0 +1,2 @@
+["Mover"
+(fn [tank] (move tank (rand-direction)))]
