@@ -1,6 +1,6 @@
 (ns Tankland.core
   [:refer-clojure :exclude [name]]
-  [:use [tankgui.tankgui]])
+  [:use tankgui.tankgui])
 
 (def ^:const size 10)
 (def ^:const wrap false)
@@ -118,7 +118,6 @@ Assumes that all arguments are legal tanks."
                      (behavior-fn tank))
                 (catch Exception e
                   (dosync (alter tank assoc :health 0)
-                    (log (.getMessage e))
                     (log "The creators of " name " lose one year point.")))))
       (log name " started.")))
   (add-watch tanks :victory
@@ -144,13 +143,13 @@ Assumes that all arguments are legal tanks."
               true)
          (catch Exception e false))))
 
-(defn- run-from-file
+(defn- run-from-files
   "Runs Tankland with tanks read in from a file. The file should start with
 ( and end with )."
-  [file-name]
+  [& file-names]
   (try
     (let [tanks (with-bindings {#'*read-eval* false}
-                  (read-string (str \( (slurp file-name) \))))
+                  (read-string (str \( (apply str (map slurp file-names)) \))))
           legal-tanks (filter legal-tank? tanks)
           illegal-count (- (count tanks) (count legal-tanks))]
       (when (pos? illegal-count)
