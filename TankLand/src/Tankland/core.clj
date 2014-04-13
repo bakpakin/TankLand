@@ -1,5 +1,6 @@
 (ns Tankland.core
   [:refer-clojure :exclude [name]]
+  [:require [clojure.java.io :as io]]
   [:use tankgui.tankgui])
 
 (def ^:const size 10)
@@ -144,9 +145,9 @@ Assumes that all arguments are legal tanks."
          (catch Exception e false))))
 
 (defn- run-from-files
-  "Runs Tankland with tanks read in from a file. The file should start with
-( and end with )."
-  [& file-names]
+  "Runs Tankland with tanks read in from specified files. If no files are
+specified, uses every .tnk file in the present working directory."
+  ([& file-names]
   (try
     (let [tanks (with-bindings {#'*read-eval* false}
                   (read-string (str \( (apply str (map slurp file-names)) \))))
@@ -157,6 +158,10 @@ Assumes that all arguments are legal tanks."
           (graphics-frame) (str illegal-count " illegal tanks.")))
       (apply run (map eval tanks)))
     (catch Exception e (println "Error reading tanks from file."))))
+  ([] (apply run-from-files
+             (filter #(.endsWith % ".tnk")
+                     (map #(.getName %)
+                          (file-seq (io/file ".")))))))
 
 (defn- kill-all-tanks
   "KILL. ALL. THE. TANKS."
