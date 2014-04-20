@@ -1,7 +1,7 @@
 (ns Tankland.core
   [:refer-clojure :exclude [name]]
   [:require [clojure.java.io :as io]]
-  [:use tankgui.tankland])
+  [:use tankgui.dantankgui])
 
 (def ^:const size 10)
 (def ^:const wrap false)

@@ -1,4 +1,4 @@
-(ns tankgui.tankland
+(ns tankgui.dantankgui
   (:import javax.swing.JPanel)
   (:import javax.swing.JFrame)
   (:import java.awt.Dimension)
@@ -38,9 +38,13 @@
 (def max-cell-size 128)
 (def min-cell-size 32)
 
+(def cell-color (atom Color/WHITE))
+(def border-color (atom Color/BLACK))
+
 (defn- draw-cells
   [g board cell-size]
-  (.setColor g Color/WHITE)
+  (println "drawing cells")
+  (.setColor g @cell-color)
   (doseq [[[y x] val] board]
            (.drawImage g 
              (cond
@@ -58,13 +62,13 @@
              nil)
            (if (and (instance? clojure.lang.IReference val) (map? @val))
              (do
-               (.setColor g Color/BLACK)
+               (.setColor g @border-color)
                (.drawString g (:name @val) (int (+ (* x cell-size) 5)) (int (+ (* y cell-size) 15)))
                ))))
 
 (defn- draw-grid
   [g width height cell-size]
-  (.setColor g Color/GRAY)
+  (.setColor g @border-color)
   (let [x1 0
         y1 0
         x2 (int (* cell-size width))
@@ -103,7 +107,7 @@
           (.setPreferredSize panel (new Dimension 800 600))
           (.setPreferredSize panel (new Dimension (* cs w) (* cs h)))
     )
-    (.setBackground panel Color/WHITE)
+    (.setBackground panel cell-color)
     panel))
 
 (def cell-renderer (proxy [javax.swing.ListCellRenderer]
@@ -196,8 +200,16 @@
 
 (defn- do-action
   "the event handler for button actions"
-  [e bf]
-  )
+  [e viewer bf]
+  (let [command (.getActionCommand e)]
+    
+    (cond
+      (= command "Set Cell Color") (do 
+                                     (reset! cell-color (.getSelectedColor bf))
+                                     (.repaint @(viewer :display-panel))
+                                     (println (.getSelectedColor bf)))
+      )
+  ))
 
 (defn- do-slide-action
   "event handler for slider changes"
@@ -212,10 +224,11 @@
   [panel viewer]
   (let [bf (boardFrame.)
         action-listener (proxy [java.awt.event.ActionListener] []
-                          (actionPerformed [e] (do-action e bf)))
+                          (actionPerformed [e] (do-action e viewer bf)))
         change-listener (proxy [javax.swing.event.ChangeListener] []
                           (stateChanged [e] (do-slide-action e viewer bf)))]
     (.setGameBoard bf panel)
+    (.addActionListener bf action-listener)
     (.addChangeListener bf change-listener)
     (.pack bf)
     (.setVisible bf true)
