@@ -1,4 +1,4 @@
-(ns tankgui.tankgui
+(ns tankgui.tankland
   (:import javax.swing.JPanel)
   (:import javax.swing.JFrame)
   (:import java.awt.Dimension)
@@ -17,7 +17,10 @@
   (:import javax.swing.JViewport)
   (:import javax.swing.JEditorPane)
   (:import java.io.PrintWriter)
-  (:import javax.swing.text.PlainDocument))
+  (:import javax.swing.text.PlainDocument)
+  (:import tankgraphics.boardFrame)
+  (:import java.awt.event.ActionListener)
+  (:import javax.swing.event.ChangeListener))
 
 (defn- load-image
   [classpath]
@@ -123,60 +126,6 @@
     (.setCellRenderer cell-renderer)
   ))
 
-(defn add-drag-control
-  "Adds the ability to drag the camera in the viewer around."
-  [viewer]
-  (.addMouseMotionListener @(viewer :display-panel)
-    (proxy [MouseAdapter] [] 
-      (mouseDragged [e]
-        (swap! (viewer :x) + (- (.getX e) @(viewer :mousex)))
-        (swap! (viewer :y) + (- (.getY e) @(viewer :mousey)))
-        (reset! (viewer :mousex) (.getX e)) 
-        (reset! (viewer :mousey) (.getY e))
-        (.repaint @(viewer :display-panel)))
-      (mouseMoved [e] 
-        (reset! (viewer :mousex) (.getX e)) 
-        (reset! (viewer :mousey) (.getY e)))))
-  viewer)
-
-(defn add-resize-control
-  "Adds capapbility of the viewer to resize grid when the window is resized."
-  [viewer]
-  (.addComponentListener @(viewer :display-panel)
-    (proxy [ComponentAdapter] [] 
-      (componentResized [e] 
-        (let [w @(viewer :width)
-              h @(viewer :height)
-              panel @(viewer :display-panel)
-              pw (.getWidth panel)
-              ph (.getHeight panel)]
-          (if (and (not= -1 w) (not= -1 h))
-            (reset! (viewer :cell-size) (min (/ pw w) (/ ph h)))))
-        (.repaint @(viewer :display-scroll))))))
-
-
-(defn add-zoom-control
-  "Adds capability of the viewer to zoom with cursor."
-  [viewer]
-  (.addMouseWheelListener @(viewer :display-panel)
-    (proxy [MouseAdapter] [] 
-      (mouseWheelMoved [e]
-          (reset! 
-            (viewer :cell-size) 
-            (min max-cell-size (max min-cell-size (* 
-                                                    @(viewer :cell-size)
-                                                    (Math/pow 1.01 (.getPreciseWheelRotation e))))))
-      (let    
-        [panel @(viewer :display-panel)
-         cs @(viewer :cell-size)
-        w @(viewer :width)
-        h @(viewer :height)]
-    (if (or (= -1 w) (= -1 h))
-          (.setPreferredSize panel (new Dimension 800 600))
-          (.setPreferredSize panel (new Dimension (* cs w) (* cs h)))
-    ))
-       (.revalidate (.getViewport @(viewer :display-scroll)))
-          (.repaint @(viewer :display-scroll))))))
 
 (defn make-viewer
   "Makes a new viewer that displays a board of given width and height, 
@@ -245,14 +194,40 @@
   (.invalidate tp)
   (.repaint tp)))
 
+(defn- do-action
+  "the event handler for button actions"
+  [e bf]
+  )
+
+(defn- do-slide-action
+  "event handler for slider changes"
+  [e viewer bf]
+  (let [source (.getSource e)]
+    (reset! (viewer :cell-size) (.getValue source))
+    (.repaint @(viewer :display-scroll))
+    (.setMainDividerLocation bf (.getWidth @(viewer :display-panel)))))
+
+(defn create-board-frame
+  "sets up the view"
+  [panel viewer]
+  (let [bf (boardFrame.)
+        action-listener (proxy [java.awt.event.ActionListener] []
+                          (actionPerformed [e] (do-action e bf)))
+        change-listener (proxy [javax.swing.event.ChangeListener] []
+                          (stateChanged [e] (do-slide-action e viewer bf)))]
+    (.setGameBoard bf panel)
+    (.addChangeListener bf change-listener)
+    (.pack bf)
+    (.setVisible bf true)
+    ))
+        
+
 (defn init-graphics
   "Initilaizes the gui with a board of specified height and width."
   ([width height]
   (def ^:private viewervar (make-viewer 64 width height))
-  (add-zoom-control viewervar)
-  (if (or (= -1 width) (= -1 height))
-    (add-drag-control viewervar)
-    ))
+  (create-board-frame @(viewervar :display-scroll) viewervar)
+  )
   ([size] (init-graphics size size))
   ([] (init-graphics -1 -1)))
 
