@@ -160,8 +160,8 @@ specified, uses every .tnk file in the present working directory."
           illegal-count (- (count tanks) (count legal-tanks))]
       (when (pos? illegal-count)
         (show-message (str illegal-count " illegal tanks.")))
-      (apply run (map eval tanks)))
-    (catch Exception e (println "Error reading tanks from file."))))
+      (apply run (map eval legal-tanks)))
+    (catch Exception e (println "Error reading tanks from file: " e))))
   ([] (apply run-from-files
              (filter #(.endsWith % ".tnk")
                      (map #(.getName %)

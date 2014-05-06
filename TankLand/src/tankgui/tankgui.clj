@@ -13,6 +13,7 @@
   (:import javax.swing.ListCellRenderer)
   (:import javax.swing.JLabel)
   (:import javax.swing.BoxLayout)
+  (:import java.awt.BorderLayout)
   (:import javax.swing.border.BevelBorder)
   (:import javax.swing.JViewport)
   (:import javax.swing.JEditorPane)
@@ -71,35 +72,19 @@
     (doseq [y (range y1 (inc y2) cell-size)]
       (.drawLine g x1 y x2 y))))
 
-(defn- draw-grid-infinite
-  [g cell-size]
-  (let [r (.getClipBounds g)
-        x1 (int (* (Math/floor (double (/ (.getX r) cell-size))) cell-size))
-        y1 (int (* (Math/floor (double (/ (.getY r) cell-size))) cell-size))
-        x2 (int (+ x1 (.getWidth r) cell-size))
-        y2 (int (+ y1 (.getHeight r) cell-size))]
-    (doseq [x (range x1 x2 cell-size)]
-      (.drawLine g x y1 x y2))
-    (doseq [y (range y1 y2 cell-size)]
-      (.drawLine g x1 y x2 y))))
-
 (defn- make-panel
   [viewer]
   (let [panel (proxy [JPanel] [] 
                 (paint [g] 
                   (proxy-super paint g)
                   (.translate g @(viewer :x) @(viewer :y)) 
-                  (if (or (= -1 @(viewer :width)) (= -1 @(viewer :height)))
-                    (draw-grid-infinite g @(viewer :cell-size))
-                    (draw-grid g @(viewer :width) @(viewer :height) @(viewer :cell-size)))
+                  (draw-grid g @(viewer :width) @(viewer :height) @(viewer :cell-size))
                   (draw-cells g @(viewer :board) @(viewer :cell-size))))
         cs @(viewer :cell-size)
         w @(viewer :width)
         h @(viewer :height)]
-    (if (or (= -1 w) (= -1 h))
-          (.setPreferredSize panel (new Dimension 800 600))
-          (.setPreferredSize panel (new Dimension (* cs w) (* cs h)))
-    )
+    (.setMinimumSize panel (new Dimension (* cs w) (* cs h)))
+    (.setPreferredSize panel (new Dimension (* cs w) (* cs h)))
     (.setBackground panel Color/WHITE)
     panel))
 
@@ -123,114 +108,76 @@
     (.setCellRenderer cell-renderer)
   ))
 
-(defn add-drag-control
-  "Adds the ability to drag the camera in the viewer around."
-  [viewer]
-  (.addMouseMotionListener @(viewer :display-panel)
-    (proxy [MouseAdapter] [] 
-      (mouseDragged [e]
-        (swap! (viewer :x) + (- (.getX e) @(viewer :mousex)))
-        (swap! (viewer :y) + (- (.getY e) @(viewer :mousey)))
-        (reset! (viewer :mousex) (.getX e)) 
-        (reset! (viewer :mousey) (.getY e))
-        (.repaint @(viewer :display-panel)))
-      (mouseMoved [e] 
-        (reset! (viewer :mousex) (.getX e)) 
-        (reset! (viewer :mousey) (.getY e)))))
-  viewer)
-
-(defn add-resize-control
-  "Adds capapbility of the viewer to resize grid when the window is resized."
-  [viewer]
-  (.addComponentListener @(viewer :display-panel)
-    (proxy [ComponentAdapter] [] 
-      (componentResized [e] 
-        (let [w @(viewer :width)
-              h @(viewer :height)
-              panel @(viewer :display-panel)
-              pw (.getWidth panel)
-              ph (.getHeight panel)]
-          (if (and (not= -1 w) (not= -1 h))
-            (reset! (viewer :cell-size) (min (/ pw w) (/ ph h)))))
-        (.repaint @(viewer :display-scroll))))))
-
-
-(defn add-zoom-control
-  "Adds capability of the viewer to zoom with cursor."
-  [viewer]
-  (.addMouseWheelListener @(viewer :display-panel)
-    (proxy [MouseAdapter] [] 
-      (mouseWheelMoved [e]
-          (reset! 
-            (viewer :cell-size) 
-            (min max-cell-size (max min-cell-size (* 
-                                                    @(viewer :cell-size)
-                                                    (Math/pow 1.01 (.getPreciseWheelRotation e))))))
-      (let    
-        [panel @(viewer :display-panel)
-         cs @(viewer :cell-size)
-        w @(viewer :width)
-        h @(viewer :height)]
-    (if (or (= -1 w) (= -1 h))
-          (.setPreferredSize panel (new Dimension 800 600))
-          (.setPreferredSize panel (new Dimension (* cs w) (* cs h)))
-    ))
-       (.revalidate (.getViewport @(viewer :display-scroll)))
-          (.repaint @(viewer :display-scroll))))))
-
 (defn make-viewer
-  "Makes a new viewer that displays a board of given width and height, 
-   or infinte width and height if no dimensions are supplied."
-  ([cell-size width height]
+  "Makes a new viewer that displays a board of given width and height"
+  [cell-size width height]
   (let [viewer 
-        {
-        :board (atom {})
-        :tanks (atom {})
-        :display-panel (atom nil)
-        :display-scroll (atom nil)
-        :document (atom nil)
-        :doc-scroll (atom nil)
-        :tank-panel (atom nil)
-        :frame (atom nil)
-        :cell-size (atom cell-size)
-        :x (atom 0)
-        :y (atom 0)
-        :width (atom width)
-        :height (atom height)
-        :mousex (atom 0)
-        :mousey (atom 0)
-        }
-        panel (make-panel viewer)
-        tank-panel (make-tank-panel viewer)
-        frame (new JFrame "Tankland - A Tank Simulation in Clojure")
-        scroll (new JScrollPane panel)
-        console (new JEditorPane)
-        doc-scroll (doto (new JScrollPane console) (.setMinimumSize (new Dimension 300 200)))
-        splitPane (new JSplitPane JSplitPane/HORIZONTAL_SPLIT scroll (new JScrollPane tank-panel))
-        vSplitPane (new JSplitPane JSplitPane/VERTICAL_SPLIT splitPane doc-scroll)
-        document (new PlainDocument)]
-  (reset! (viewer :display-panel) panel)
-  (reset! (viewer :doc-scroll) doc-scroll)
-  (reset! (viewer :tank-panel) tank-panel)
-  (reset! (viewer :frame) frame)
-  (reset! (viewer :display-scroll) scroll)
-  (reset! (viewer :document) document)
-  (.setDocument console document)
-  (.setContinuousLayout splitPane true)
-  (.setContinuousLayout vSplitPane true)
-  (doto frame 
-      (.setContentPane vSplitPane) 
-      .pack 
-      (.setVisible true))
-  viewer))
-  ([cell-size]
-  (make-viewer cell-size -1 -1)))
+      {
+      :board (atom {})
+      :tanks (atom {})
+      :display-panel (atom nil)
+      :document (atom nil)
+      :doc-scroll (atom nil)
+      :tank-panel (atom nil)
+      :tank-scroll (atom nil)
+      :frame (atom nil)
+      :cell-size (atom cell-size)
+      :x (atom 0)
+      :y (atom 0)
+      :width (atom width)
+      :height (atom height)
+      :mousex (atom 0)
+      :mousey (atom 0)
+      }
+      panel (make-panel viewer)
+      tank-panel (make-tank-panel viewer)
+      tank-scroll (doto 
+                    (new JScrollPane tank-panel)
+                    (.setPreferredSize (new Dimension 300, 300)))
+      frame (new JFrame "Tankland - A Tank Simulation in Clojure")
+      console (new JEditorPane)
+      doc-scroll (doto (new JScrollPane console) 
+                   (.setPreferredSize (new Dimension 200 200)))                    
+      document (new PlainDocument)
+      main-panel (doto (new JPanel (new BorderLayout)) 
+                   (.add panel BorderLayout/CENTER)
+                   (.add tank-scroll BorderLayout/LINE_END)
+                   (.add doc-scroll BorderLayout/SOUTH))]
+   (reset! (viewer :display-panel) panel)
+   (reset! (viewer :doc-scroll) doc-scroll)
+   (reset! (viewer :tank-panel) tank-panel)
+   (reset! (viewer :tank-scroll) tank-scroll)
+   (reset! (viewer :frame) frame)
+   (reset! (viewer :document) document)
+   (.setDocument console document)
+   (javax.swing.SwingUtilities/invokeAndWait
+     (proxy [Runnable] [] (run [] 
+                            (doto frame 
+                                       (.setContentPane main-panel) 
+                                       (.pack) 
+                                       (.setVisible true)))))
+   viewer))
+
+(defn add-resize-listener
+  "Allows the window to be reiszed without messing up ui."
+  [viewer]
+  (.addComponentListener @(:frame viewer)
+    (proxy [ComponentAdapter] []
+      (componentResized [e]
+        (let [d (.getSize @(:display-panel viewer))
+              dx (.getWidth d)
+              dy (.getHeight d)
+              p (.getPreferredSize @(:display-panel viewer))
+              px (.getWidth p)
+              py (.getWidth p)]
+          (.setSize d (if (< dx px) px dx) (if (< dy py) py dy)))
+        (.pack @(:frame viewer))))))
 
 (defn update-board
   "Updates the board of the viewer. Also calls a repaint."
   [viewer board]
   (reset! (viewer :board) board)
-  (.repaint @(viewer :display-scroll)))
+  (.repaint @(viewer :display-panel)))
 
 (defn update-tank-panel
   "Updates the tank information in the viewer. Also calls a repaint."
@@ -248,13 +195,9 @@
 (defn init-graphics
   "Initilaizes the gui with a board of specified height and width."
   ([width height]
-  (def ^:private viewervar (make-viewer 64 width height))
-  (add-zoom-control viewervar)
-  (if (or (= -1 width) (= -1 height))
-    (add-drag-control viewervar)
-    ))
-  ([size] (init-graphics size size))
-  ([] (init-graphics -1 -1)))
+  (def ^:private viewervar (make-viewer 48 width height))
+  (add-resize-listener viewervar))
+  ([size] (init-graphics size size)))
 
 (defn log-to-viewer
   "Logs a message to the console."
