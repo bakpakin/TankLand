@@ -7,14 +7,17 @@
 (def ^:const wrap false)
 (def ^:const starting-energy 1000)
 (def ^:const max-energy (* 2 starting-energy))
-(def ^:const energy-constants
-  {:move 0 :place-mine 0 :defuse-mine 0 :scan-line 0 :scan-area 0
-   :fire-artillery 0 :fire-bullet 0 :repair 0 :recharge -10
-   :activate-shield 0})
+(def ^:const max-health 100)
+(def ^{:const true
+       :doc (str "Constants that provide the base for the "
+                 "scaling energy costs of actions.")} energy-constants
+  {:move 10 :place-mine 10 :defuse-mine 100 :scan-line 10 :scan-area 10
+   :fire-artillery 20 :fire-bullet (* 10 size) :repair 20 :recharge -20
+   :activate-shield 25/2})
 (def ^:const time-costs
-  {:move 1 :place-mine 1 :defuse-mine 1 :scan-line 1 :scan-area 1
-   :fire-artillery 1 :fire-bullet 1 :repair 1 :recharge "N/A"
-   :activate-shield 1})
+  {:move 1 :place-mine 4 :defuse-mine 4 :scan-line 1 :scan-area 4
+   :fire-artillery 3 :fire-bullet 2 :repair 8 :recharge "N/A"
+   :activate-shield 0})
 (def ^:private timescale 250)
 (def ^:private recharge-rate 1)
 
@@ -88,7 +91,7 @@ on the board, or there is another tank of the same name, returns nil."
   [name]
   (if (contains? @tanks name)
     (log "A tank already has the name " name ".")
-    (let [tank (ref {:name name :health 100 :energy starting-energy
+    (let [tank (ref {:name name :health max-health :energy starting-energy
                      :shield 0 :information {}})
           tank-placed? (ref false)]
       (dosync (if-let [locations (seq (for [row (range size), col (range size)
@@ -115,10 +118,10 @@ Assumes that all arguments are legal tanks."
   (init-graphics size)
   (future (while true
             (do-graphics @board)
-              (Thread/sleep 33)))
+            (Thread/sleep 33)))
   (future (while true
             (do-tanks @tanks)
-              (Thread/sleep timescale)))
+            (Thread/sleep timescale)))
   (doseq [[name behavior-fn] info]
     (if-let [tank (add-tank name)]
       (future (try (while (alive @tank)
@@ -153,15 +156,15 @@ Assumes that all arguments are legal tanks."
   "Runs Tankland with tanks read in from specified files. If no files are
 specified, uses every .tnk file in the present working directory."
   ([& file-names]
-  (try
-    (let [tanks (with-bindings {#'*read-eval* false}
-                  (read-string (str \( (apply str (map slurp file-names)) \))))
-          legal-tanks (filter legal-tank? tanks)
-          illegal-count (- (count tanks) (count legal-tanks))]
-      (when (pos? illegal-count)
-        (show-message (str illegal-count " illegal tanks.")))
-      (apply run (map eval legal-tanks)))
-    (catch Exception e (println "Error reading tanks from file: " e))))
+    (try
+      (let [tanks (with-bindings {#'*read-eval* false}
+                    (read-string (str \( (apply str (map slurp file-names)) \))))
+            legal-tanks (filter legal-tank? tanks)
+            illegal-count (- (count tanks) (count legal-tanks))]
+        (when (pos? illegal-count)
+          (show-message (str illegal-count " illegal tanks.")))
+        (apply run (map eval legal-tanks)))
+      (catch Exception e (println "Error reading tanks from file: " e))))
   ([] (apply run-from-files
              (filter #(.endsWith % ".tnk")
                      (map #(.getName %)
@@ -237,10 +240,7 @@ The resulting function will be public."
 (defn- scan-cells
   "Takes a list of cells to scan and returns a map with the occupied cells."
   [cells]
-  (->> cells
-    (map (fn [cell] {cell (occupant-type cell)}))
-    (filter #(first (vals %)))
-    (into {})))
+  (into {} (map (fn [cell] {cell (occupant-type cell)}) cells)))
 
 (defn- area
   "Generates a list of the cells in an area, excluding the center."
@@ -297,7 +297,8 @@ Energy cost is constant."
           (clear-cell old-loc)
           (log (name tank) " moved from " old-loc " to " new-loc "."))
         (log (name tank) " was blocked when trying to move from "
-             old-loc " to " new-loc ".")))))
+             old-loc " to " new-loc "."))))
+  nil)
 
 (defn place-mine
   "Place a mine that does the given amount of damage
@@ -315,7 +316,8 @@ Energy cost scales with damage."
         (nil? occupant) (alter board assoc mine-loc (ref damage))
         (number? (deref' occupant)) (alter occupant + damage)
         (map? (deref' occupant))
-        (deal-damage occupant damage)))))
+        (deal-damage occupant damage))))
+  nil)
 
 (defn defuse-mine
   "If there is a mine in the adjacent square in the given direction, defuse it.
@@ -326,12 +328,13 @@ Uses energy even if there is not a mine. Energy cost is constant."
     (let [defuse-loc (new-location (location tank) direction)]
       (when (number? (deref' (get-cell defuse-loc)))
         (clear-cell defuse-loc)
-        (log (name tank) " defused the mine at " defuse-loc ".")))))
+        (log (name tank) " defused the mine at " defuse-loc "."))))
+  nil)
 
 (defn scan-line
   "Scan in a line in one direction for some distance.
-Returns a map of the occupied scanned squares to their occupants,
-each of which will be either :tank, :mine, or :wall.
+Returns a map of the scanned squares to their occupants,
+each of which will be either :tank, :mine, :wall, or nil.
 Energy cost scales with the distance."
   [tank direction distance]
   (do-tank-action
@@ -347,7 +350,7 @@ each of which will be either :tank, :mine, or :wall.
 Energy cost scales with the square of the radius."
   [tank radius]
   (do-tank-action
-    tank (#(* % % %2) (energy-constants :scan-area) radius) (time-costs :scan-area)
+    tank (* (energy-constants :scan-area) radius radius) (time-costs :scan-area)
     (scan-cells (area (location tank) radius))))
 
 (defn fire-artillery
@@ -355,14 +358,16 @@ Energy cost scales with the square of the radius."
 tank. Energy cost scales with the distance of the target."
   [tank target]
   (do-tank-action
-    tank (* (energy-constants :fire-artillery) (distance (location tank) target))
+    tank (* (energy-constants :fire-artillery)
+            (distance (location tank) target))
     (time-costs :fire-artillery)
     (let [occupant (get-cell target)
           log (partial log (name tank) " fired artillery at " target " and ")]
       (if (map? (deref' occupant))
         (do (log " hit " (name occupant) ".")
-          (deal-damage occupant 10)
-          (log "missed."))))))
+          (deal-damage occupant 10))
+        (log "missed."))))
+  nil)
 
 (defn fire-bullet
   "Fire a bullet. The bullet will travel in a straight line until it hits a
@@ -386,7 +391,8 @@ Energy cost is constant."
               (deal-damage occupant damage)
               (log "hit " (name occupant) "."))
             :default
-            (recur (- damage 2) (new-location bullet-loc direction))))))))
+            (recur (- damage 2) (new-location bullet-loc direction)))))))
+  nil)
 
 (defn repair
   "Repairs some damage to a tank. The health of the tank cannot exceed 100,
@@ -396,8 +402,9 @@ Energy cost scales with the amount of damage repaired."
   [tank damage]
   (do-tank-action
     tank (* (energy-constants :repair) damage) (time-costs :repair)
-    (alter tank update-in [:health] #(min 100 (+ damage %)))
-    (log (name tank) " repaired " damage " damage.")))
+    (alter tank update-in [:health] #(min max-health (+ damage %)))
+    (log (name tank) " repaired " damage " damage."))
+  nil)
 
 (defn recharge
   "Go dormant for some number of time units in order to regain energy.
@@ -405,12 +412,13 @@ Energy gained scales with time spent dormant."
   [tank time-units]
   (do-tank-action
     tank (* (energy-constants :recharge) time-units) time-units
-    (log (name tank) " recharged for " time-units " time units.")))
+    (log (name tank) " recharged for " time-units " time units."))
+  nil)
 
 (defn activate-shield
   "Activate a shield that blocks some portion of damage (between 0 and 1)
 for some amount of time units. Energy cost scales with the number of time units
-divided by 1 minus the portion of damage blocked."
+divided by (1 minus the portion of damage blocked)."
   [tank time-units portion]
   (let [portion (rationalize portion)]
     (when (< 0 portion 1)
@@ -421,18 +429,21 @@ divided by 1 minus the portion of damage blocked."
         (do-graphics @board)
         (future (Thread/sleep (* time-units timescale))
           (dosync (alter tank update-in [:shield] #(+ (/ (- % 1) portion) 1)))
-          (do-graphics @board))))))
+          (do-graphics @board)))))
+  nil)
 
 (defn store-information
   "Stores information in the tank's memory at the given key.
 Has no time or energy cost. The information can be retrieved with get-information."
   [tank key information]
-  (dosync (alter tank assoc-in [:information key] information)))
+  (dosync (alter tank assoc-in [:information key] information))
+  nil)
 
 (defn delete-information
   "Deletes the information stored in the tanks memory at the given key."
   [tank key]
-  (dosync (alter tank #(assoc % :information (dissoc (:information %) key)))))
+  (dosync (alter tank #(assoc % :information (dissoc (:information %) key))))
+  nil)
 
 (defn get-information
   "Gets the information stored in the tank's memory. Has no time or energy cost."
