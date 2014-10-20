@@ -126,7 +126,7 @@ Assumes that all arguments are legal tanks."
                      (behavior-fn tank))
                 (catch Exception e
                   (dosync (alter tank assoc :health 0)
-                    (log "The creators of " name " lose one year point.")))))
+                    (log name " self destructed (had a runtime exception).")))))
       (log name " started.")))
   (add-watch tanks :victory
              #(when (and (= (count %4) 1) (> (count %3) 1))
@@ -150,14 +150,23 @@ Assumes that all arguments are legal tanks."
               true)
          (catch Exception e false))))
 
+(defn- read-tank-from-file
+  "Reads a tank from a file, returning nil if the contents of the file
+are not a legal tank."
+  [file-name]
+  (try
+    (with-bindings {#'*read-eval* false}
+      (let [tank (read-string (slurp file-name))]
+        (if (and (vector? tank) (= 2 (count tank)) (legal-tank? tank)) tank)))
+    (catch Exception e nil)))
+
 (defn- run-from-files
   "Runs Tankland with tanks read in from specified files. If no files are
 specified, uses every .tnk file in the present working directory."
   ([& file-names]
     (try
-      (let [tanks (with-bindings {#'*read-eval* false}
-                    (read-string (str \( (apply str (map slurp file-names)) \))))
-            legal-tanks (filter legal-tank? tanks)
+      (let [tanks (map read-tank-from-file file-names)
+            legal-tanks (filter identity tanks)
             illegal-count (- (count tanks) (count legal-tanks))]
         (when (pos? illegal-count)
           (show-message (str illegal-count " illegal tanks.")))
@@ -438,7 +447,8 @@ Has no time or energy cost. The information can be retrieved with get-informatio
   nil)
 
 (defn delete-information
-  "Deletes the information stored in the tanks memory at the given key."
+  "Deletes the information stored in the tanks memory at the given key.
+Has no time or energy cost."
   [tank key]
   (dosync (alter tank #(assoc % :information (dissoc (:information %) key))))
   nil)
