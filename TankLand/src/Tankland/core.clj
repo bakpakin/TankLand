@@ -4,13 +4,11 @@
   [:use tankgui.tankgui])
 
 (def ^:const size 10)
-(def ^:const wrap false)
+(def ^:const wrap true)
 (def ^:const starting-energy 1000)
 (def ^:const max-energy (* 2 starting-energy))
 (def ^:const max-health 100)
-(def ^{:const true
-       :doc (str "Constants that provide the base for the "
-                 "scaling energy costs of actions.")} energy-constants
+(def ^:const energy-constants
   {:move 10 :place-mine 10 :defuse-mine 100 :scan-line 10 :scan-area 10
    :fire-artillery 20 :fire-bullet (* 10 size) :repair 20 :recharge -20
    :activate-shield 25/2})
@@ -362,11 +360,11 @@ tank. Energy cost scales with the distance of the target."
             (distance (location tank) target))
     (time-costs :fire-artillery)
     (let [occupant (get-cell target)
-          log (partial log (name tank) " fired artillery at " target " and ")]
+          hit #(log (name tank) " fired artillery at " target " and hit " % ".")]
       (if (map? (deref' occupant))
-        (do (log " hit " (name occupant) ".")
+        (do (hit (name occupant))
           (deal-damage occupant 10))
-        (log "missed."))))
+        (hit "nothing"))))
   nil)
 
 (defn fire-bullet
@@ -389,7 +387,7 @@ Energy cost is constant."
             (map? (deref' occupant))
             (do
               (deal-damage occupant damage)
-              (log "hit " (name occupant) "."))
+              (log "hit " (name occupant) " for " damage " damage."))
             :default
             (recur (- damage 2) (new-location bullet-loc direction)))))))
   nil)
@@ -426,10 +424,10 @@ divided by (1 minus the portion of damage blocked)."
               tank (* (energy-constants :activate-shield) time-units (/ (- 1 portion)))
               (time-costs :activate-shield)
               (alter tank update-in [:shield] #(- 1 (* (- 1 %) portion))))
-        (do-graphics @board)
         (future (Thread/sleep (* time-units timescale))
           (dosync (alter tank update-in [:shield] #(+ (/ (- % 1) portion) 1)))
-          (do-graphics @board)))))
+          (do-graphics @board))
+        (do-graphics @board))))
   nil)
 
 (defn store-information
